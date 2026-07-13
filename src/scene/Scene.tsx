@@ -7,7 +7,7 @@ export function Scene() {
       <Sky sunPosition={[100, 60, 100]} distance={15000} />
       <ambientLight intensity={0.6} />
       <directionalLight position={[500, 800, 300]} intensity={1.2} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[4000, 4000]} />
         <meshStandardMaterial color="#8a9a6b" />
       </mesh>

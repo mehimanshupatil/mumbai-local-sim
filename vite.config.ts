@@ -6,7 +6,7 @@ export default defineConfig({
   base: '/mumbai-local-sim/',
   plugins: [react()],
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 })

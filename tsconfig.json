@@ -12,8 +12,7 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "useDefineForClassFields": true,
-    "types": ["vitest/globals"]
+    "useDefineForClassFields": true
   },
   "include": ["src", "vite.config.ts"]
 }
