@@ -3,15 +3,43 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Sky } from '@react-three/drei'
 import westernJson from '../data/western.json'
 import type { NetworkData } from '../data/network-types'
+import { SIM_START } from '../sim/clock'
+import { buildTimetable } from '../sim/simulate'
+import type { ServiceDef } from '../sim/types'
 import { Corridor } from './Corridor'
+import { TRACK_SPACING_SCENE_M } from './config'
 import { createProjection } from './projection'
+import { SimClockDriver } from './sim-clock'
+import { buildTrainTrack } from './track-geometry'
+import { Train } from './Train'
 
 const network = westernJson as NetworkData
 
 const FOV_DEG = 45
 
+// The first service: one slow local departing Churchgate at sim start,
+// stopping everywhere to Virar. The synthetic scheduler (ticket #6) will
+// replace this hand-rolled def.
+const virarIndex = network.stations.findIndex((s) => s.name === 'Virar')
+if (virarIndex < 0) throw new Error('baked network is missing Virar')
+const firstSlowLocal: ServiceDef = {
+  id: 'CCG-VR-0831',
+  serviceType: 'slow',
+  direction: 'down',
+  track: 0,
+  departureTime: SIM_START,
+  stopIds: network.stations.slice(0, virarIndex + 1).map((s) => s.id),
+}
+
 export function Scene() {
   const projection = useMemo(() => createProjection(network), [])
+  const timetable = useMemo(() => buildTimetable(network, firstSlowLocal), [])
+  // Down slow line: one track left of the centerline pending real
+  // per-section track assignment (ticket #6).
+  const trainTrack = useMemo(
+    () => buildTrainTrack(network, projection, -TRACK_SPACING_SCENE_M),
+    [projection],
+  )
   const { minX, maxX, minZ, maxZ } = projection.bounds
   const cx = (minX + maxX) / 2
   const cz = (minZ + maxZ) / 2
@@ -37,6 +65,8 @@ export function Scene() {
         <meshStandardMaterial color="#8a9a6b" />
       </mesh>
       <Corridor network={network} projection={projection} />
+      <SimClockDriver />
+      <Train timetable={timetable} track={trainTrack} />
       <OrbitControls
         makeDefault
         target={[cx, 0, cz]}

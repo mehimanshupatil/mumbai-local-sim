@@ -24,11 +24,16 @@ function cumulativeLength(points: [number, number][]): number[] {
   return out
 }
 
-/** Point interpolated at cumulative length m. */
-function pointAt(points: [number, number][], lengths: number[], m: number): [number, number] {
+/** Segment index and clamped interpolation factor at cumulative length m. */
+function segmentAt(lengths: number[], m: number): { i: number; t: number } {
   let i = 1
   while (i < lengths.length - 1 && lengths[i] < m) i++
-  const t = Math.max(0, Math.min(1, (m - lengths[i - 1]) / (lengths[i] - lengths[i - 1] || 1)))
+  return { i, t: Math.max(0, Math.min(1, (m - lengths[i - 1]) / (lengths[i] - lengths[i - 1] || 1))) }
+}
+
+/** Point interpolated at cumulative length m. */
+function pointAt(points: [number, number][], lengths: number[], m: number): [number, number] {
+  const { i, t } = segmentAt(lengths, m)
   return [
     points[i - 1][0] + t * (points[i][0] - points[i - 1][0]),
     points[i - 1][1] + t * (points[i][1] - points[i - 1][1]),
@@ -60,6 +65,56 @@ export function offsetPolyline(points: [number, number][], d: number): [number, 
   })
 }
 
+/** A polyline a train can be posed on by baked chainage. */
+export interface TrainTrack {
+  points: [number, number][]
+  lengths: number[]
+  /** Scene metres per baked chainage metre (projection distortion, ~1). */
+  scale: number
+}
+
+/** The corridor centerline offset sideways, measured for chainage lookup. */
+export function buildTrainTrack(
+  network: NetworkData,
+  projection: Projection,
+  offsetM: number,
+): TrainTrack {
+  const centerline = network.corridor.map(projection.toScene)
+  const points = offsetM === 0 ? centerline : offsetPolyline(centerline, offsetM)
+  const lengths = cumulativeLength(points)
+  return { points, lengths, scale: lengths[lengths.length - 1] / network.lengthM }
+}
+
+export interface TrackPose {
+  x: number
+  z: number
+  /** Heading for a mesh whose long axis is local +z. */
+  angleRad: number
+}
+
+/**
+ * Position + heading at a baked chainage, shifted alongOffsetSceneM scene
+ * metres along the track (e.g. trailing coaches of a rake). Beyond either
+ * terminus the pose extrapolates along the end tangent, so a rake berthed
+ * at a terminus lines up instead of piling onto the clamped endpoint.
+ */
+export function poseAt(track: TrainTrack, chainageM: number, alongOffsetSceneM = 0): TrackPose {
+  const { points, lengths } = track
+  const m = chainageM * track.scale + alongOffsetSceneM
+  const { i, t } = segmentAt(lengths, m)
+  const [ax, az] = points[i - 1]
+  const [bx, bz] = points[i]
+  const segLen = lengths[i] - lengths[i - 1] || 1
+  // Signed overshoot past the polyline ends, in segment-fraction units.
+  const overshoot = m < 0 ? m / segLen : m > lengths[lengths.length - 1] ? (m - lengths[lengths.length - 1]) / segLen : 0
+  const f = t + overshoot
+  return {
+    x: ax + f * (bx - ax),
+    z: az + f * (bz - az),
+    angleRad: Math.atan2(bx - ax, bz - az),
+  }
+}
+
 /**
  * One polyline per running track. Section chainages index the corridor by
  * its own planar length — scene length and baked chainage agree within the
@@ -70,9 +125,7 @@ export function buildTrackPolylines(
   projection: Projection,
   spacingM: number,
 ): TrackPolyline[] {
-  const centerline = network.corridor.map(projection.toScene)
-  const lengths = cumulativeLength(centerline)
-  const scale = lengths[lengths.length - 1] / network.lengthM
+  const { points: centerline, lengths, scale } = buildTrainTrack(network, projection, 0)
   const out: TrackPolyline[] = []
   for (const section of network.sections) {
     const base = slice(centerline, lengths, section.fromM * scale, section.toM * scale)
