@@ -1,0 +1,55 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0b0e14;
+  color: #e8e8e8;
+}
+
+.app {
+  height: 100%;
+  position: relative;
+}
+
+.app canvas {
+  display: block;
+}
+
+.header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(rgba(11, 14, 20, 0.75), transparent);
+  pointer-events: none;
+}
+
+.header h1 {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.line-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #7b1fa2;
+  color: #fff;
+}
