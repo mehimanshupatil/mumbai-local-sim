@@ -53,3 +53,39 @@ body {
   background: #7b1fa2;
   color: #fff;
 }
+
+.clock-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.clock-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.speed-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e8e8e8;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.speed-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.speed-btn.active {
+  background: #7b1fa2;
+  border-color: #7b1fa2;
+}
