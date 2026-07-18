@@ -90,10 +90,12 @@ describe('one slow local Churchgate → Virar', () => {
     }
   })
 
-  it('reaches Virar in a plausible 70–110 minutes', () => {
+  it('reaches Virar in the real-world 90–110 minutes', () => {
+    // Published WR slow-local time Churchgate→Virar is ~95-100 min; the
+    // kinematics are calibrated against real per-leg runtimes.
     const run = fullRun()
     const durationMin = (run[run.length - 1].t - DEPART) / 60
-    expect(durationMin).toBeGreaterThan(70)
+    expect(durationMin).toBeGreaterThan(90)
     expect(durationMin).toBeLessThan(110)
   })
 

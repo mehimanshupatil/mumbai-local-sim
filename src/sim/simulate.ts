@@ -11,10 +11,15 @@ import type { SimTime } from './clock'
 import { legProfile, type LegProfile } from './kinematics'
 import type { ServiceDef, TrainState } from './types'
 
-/** EMU performance — one profile for all v1 service types. */
-const VMAX_MPS = 22 // ~80 km/h
-const ACCEL_MPS2 = 0.7
-const DECEL_MPS2 = 0.9
+/**
+ * EMU performance — one profile for all v1 service types. Calibrated against
+ * real WR inter-station runtimes (data/Mumbai Local Train Dataset.csv):
+ * effective cruise below the stock's 80 km/h top speed, gentle curves and
+ * signal caution folded in. Total Churchgate→Dahanu within ~5% of published.
+ */
+const VMAX_MPS = 15.5 // ~56 km/h effective
+const ACCEL_MPS2 = 0.5
+const DECEL_MPS2 = 0.7
 export const DWELL_S = 30
 
 interface TimetableStop {
