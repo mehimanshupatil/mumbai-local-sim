@@ -1,0 +1,12 @@
+{
+  "width": 640,
+  "height": 1280,
+  "west": 72.421875,
+  "east": 73.30078125,
+  "north": 20.303417518489294,
+  "south": 18.64624514267062,
+  "zoom": 11,
+  "downsample": 2,
+  "encoding": "int16-le metres, row 0 = north edge",
+  "source": "AWS Terrain Tiles (terrarium), https://registry.opendata.aws/terrain-tiles/"
+}

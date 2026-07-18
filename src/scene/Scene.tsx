@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Sky } from '@react-three/drei'
 import westernJson from '../data/western.json'
@@ -7,8 +7,10 @@ import { syntheticScheduler } from '../sim/scheduler'
 import { buildTimetable } from '../sim/simulate'
 import { Corridor } from './Corridor'
 import { Fleet } from './Fleet'
+import { loadHeightfield, type Heightfield } from './heightfield'
 import { createProjection } from './projection'
 import { SimClockDriver } from './sim-clock'
+import { Terrain } from './Terrain'
 
 const network = westernJson as NetworkData
 
@@ -19,6 +21,19 @@ const timetables = syntheticScheduler(network).map((def) => buildTimetable(netwo
 
 export function Scene() {
   const projection = useMemo(() => createProjection(network), [])
+  const [heightfield, setHeightfield] = useState<Heightfield | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    loadHeightfield(projection)
+      .then((hf) => {
+        if (!cancelled) setHeightfield(hf)
+      })
+      .catch((err) => console.error('terrain failed to load, scene stays empty:', err))
+    return () => {
+      cancelled = true
+    }
+  }, [projection])
+
   const { minX, maxX, minZ, maxZ } = projection.bounds
   const cx = (minX + maxX) / 2
   const cz = (minZ + maxZ) / 2
@@ -29,23 +44,32 @@ export function Scene() {
 
   return (
     <Canvas
+      // 120 km of coastal plain metres from a 190 km camera: the standard
+      // depth buffer z-fights sea against low-lying land.
+      gl={{ logarithmicDepthBuffer: true }}
       camera={{
         position: [cx, distance, cz + distance * 0.25],
         fov: FOV_DEG,
-        near: 10,
+        near: 50,
         far: distance * 6,
       }}
     >
       <Sky sunPosition={[100, 60, 100]} distance={distance * 4} />
       <ambientLight intensity={0.6} />
       <directionalLight position={[50000, 80000, 30000]} intensity={1.2} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]}>
-        <planeGeometry args={[extent * 10, extent * 10]} />
-        <meshStandardMaterial color="#8a9a6b" />
-      </mesh>
-      <Corridor network={network} projection={projection} />
-      <SimClockDriver />
-      <Fleet network={network} projection={projection} timetables={timetables} />
+      {heightfield && (
+        <>
+          <Terrain heightfield={heightfield} projection={projection} />
+          <Corridor network={network} projection={projection} heightfield={heightfield} />
+          <SimClockDriver />
+          <Fleet
+            network={network}
+            projection={projection}
+            heightfield={heightfield}
+            timetables={timetables}
+          />
+        </>
+      )}
       <OrbitControls
         makeDefault
         target={[cx, 0, cz]}

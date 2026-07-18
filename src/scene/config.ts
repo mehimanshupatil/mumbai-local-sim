@@ -14,3 +14,13 @@ export const TRACK_SPACING_SCENE_M = 5 * RENDER_EXAGGERATION
  */
 export const COACH_LENGTH_SCENE_M = 21.3 * 2
 export const COACH_GAP_SCENE_M = 4
+
+/**
+ * Vertical exaggeration for terrain relief. The corridor is coastal plain;
+ * without it the Sahyadri foothills east of the line read as noise from a
+ * 120 km camera distance.
+ */
+export const TERRAIN_EXAGGERATION = 2.5
+
+/** Scene Y of the sea surface (slightly above the 0 m seabed contour). */
+export const SEA_LEVEL_Y = 0.4

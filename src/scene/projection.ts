@@ -12,6 +12,8 @@ const M_PER_DEG_LAT = 111_320
 export interface Projection {
   /** [x, z] scene metres. */
   toScene: (p: LonLat) => [number, number]
+  /** Inverse: scene [x, z] back to [lon, lat]. */
+  toGeo: (x: number, z: number) => LonLat
   /** Corridor bounding box in scene metres. */
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number }
 }
@@ -35,11 +37,16 @@ export function createProjection(network: NetworkData): Projection {
     (lon - lon0) * mPerDegLon,
     -(lat - lat0) * M_PER_DEG_LAT,
   ]
+  const toGeo = (x: number, z: number): LonLat => [
+    lon0 + x / mPerDegLon,
+    lat0 - z / M_PER_DEG_LAT,
+  ]
 
   const [ax, az] = toScene([minLon, minLat])
   const [bx, bz] = toScene([maxLon, maxLat])
   return {
     toScene,
+    toGeo,
     bounds: {
       minX: Math.min(ax, bx),
       maxX: Math.max(ax, bx),

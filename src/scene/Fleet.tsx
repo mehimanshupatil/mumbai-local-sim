@@ -11,6 +11,7 @@ import {
   type ServiceType,
 } from '../sim/types'
 import { COACH_GAP_SCENE_M, COACH_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } from './config'
+import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import { simClock } from './sim-clock'
 import { buildTrainTrack, poseAt } from './track-geometry'
@@ -56,10 +57,12 @@ function laneFor(track: number, sectionTracks: number): number {
 export function Fleet({
   network,
   projection,
+  heightfield,
   timetables,
 }: {
   network: NetworkData
   projection: Projection
+  heightfield: Heightfield
   timetables: Timetable[]
 }) {
   const bodyRef = useRef<InstancedMesh>(null)
@@ -100,7 +103,9 @@ export function Fleet({
         // Same normal convention as offsetPolyline: left of travel = (-dz, dx).
         const nx = -Math.cos(pose.angleRad)
         const nz = Math.sin(pose.angleRad)
-        dummy.position.set(pose.x + nx * lateral, BODY_H / 2 + 2, pose.z + nz * lateral)
+        const px = pose.x + nx * lateral
+        const pz = pose.z + nz * lateral
+        dummy.position.set(px, heightfield.railY(px, pz) + BODY_H / 2, pz)
         dummy.rotation.set(0, pose.angleRad, 0)
         dummy.updateMatrix()
         bodies.setMatrixAt(n, dummy.matrix)
