@@ -10,6 +10,17 @@ export type ServiceType = 'slow' | 'fast' | 'ac' | 'express'
 /** Indian Railways convention: up = toward Churchgate, down = away. */
 export type Direction = 'up' | 'down'
 
+/**
+ * Semantic running-track indices, shared by every scheduler implementation.
+ * The render layer maps them onto however many tracks a section actually has.
+ */
+export const TRACK_SLOW_DOWN = 0
+export const TRACK_SLOW_UP = 1
+export const TRACK_FAST_DOWN = 2
+export const TRACK_FAST_UP = 3
+export const TRACK_EXPRESS_DOWN = 4
+export const TRACK_EXPRESS_UP = 5
+
 export interface TrainState {
   id: string
   serviceType: ServiceType
@@ -35,4 +46,6 @@ export interface ServiceDef {
   departureTime: SimTime
   /** Ordered station ids the service halts at. */
   stopIds: string[]
+  /** Seconds spent at each halt; defaults to the standard 30 s. 0 = nonstop passage points. */
+  dwellS?: number
 }

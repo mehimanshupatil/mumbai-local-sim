@@ -36,14 +36,15 @@ export function buildTimetable(network: NetworkData, def: ServiceDef): Timetable
   const byId = new Map(network.stations.map((s) => [s.id, s]))
   const stops: TimetableStop[] = []
   const legs: LegProfile[] = []
+  const dwellS = def.dwellS ?? DWELL_S
   // The rake dwells at the origin platform before departureTime, so the
   // actual departure from the first stop is exactly def.departureTime.
-  let t = def.departureTime - DWELL_S
+  let t = def.departureTime - dwellS
   for (let i = 0; i < def.stopIds.length; i++) {
     const station = byId.get(def.stopIds[i])
     if (!station) throw new Error(`unknown station id: ${def.stopIds[i]}`)
     const arriveT = t
-    const departT = arriveT + DWELL_S
+    const departT = arriveT + dwellS
     stops.push({ id: station.id, chainageM: station.chainageM, arriveT, departT })
     if (i < def.stopIds.length - 1) {
       const next = byId.get(def.stopIds[i + 1])

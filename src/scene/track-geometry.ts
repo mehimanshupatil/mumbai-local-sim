@@ -26,8 +26,15 @@ function cumulativeLength(points: [number, number][]): number[] {
 
 /** Segment index and clamped interpolation factor at cumulative length m. */
 function segmentAt(lengths: number[], m: number): { i: number; t: number } {
-  let i = 1
-  while (i < lengths.length - 1 && lengths[i] < m) i++
+  // Binary search — called per coach per frame at fleet scale.
+  let lo = 1
+  let hi = lengths.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (lengths[mid] < m) lo = mid + 1
+    else hi = mid
+  }
+  const i = lo
   return { i, t: Math.max(0, Math.min(1, (m - lengths[i - 1]) / (lengths[i] - lengths[i - 1] || 1))) }
 }
 
