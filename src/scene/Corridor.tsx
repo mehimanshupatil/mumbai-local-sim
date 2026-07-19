@@ -71,7 +71,18 @@ function StationMarker({
         <meshStandardMaterial color={color} />
       </mesh>
       <Billboard position={[0, 520, 0]}>
-        <Text fontSize={220} color="#ffffff" outlineWidth={12} outlineColor="#0b0e14" anchorY="bottom">
+        {/* Labels skip the depth test: troika text z-flickers against the
+            logarithmic depth buffer on some GPUs, and terrain should never
+            occlude a station name anyway. */}
+        <Text
+          fontSize={220}
+          color="#ffffff"
+          outlineWidth={12}
+          outlineColor="#0b0e14"
+          anchorY="bottom"
+          renderOrder={10}
+          material-depthTest={false}
+        >
           {name}
         </Text>
       </Billboard>
