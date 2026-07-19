@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Sky, Stars } from '@react-three/drei'
+import { MapControls, Sky, Stars } from '@react-three/drei'
 import westernJson from '../data/western.json'
 import type { NetworkData } from '../data/network-types'
 import { syntheticScheduler } from '../sim/scheduler'
@@ -87,14 +87,17 @@ export function Scene() {
           />
         </>
       )}
-      <OrbitControls
+      {/* Google-Maps-style navigation: drag pans along the ground, right-drag
+          (or two fingers) rotates/tilts, wheel zooms toward the cursor. */}
+      <MapControls
         makeDefault
         target={[cx, 0, cz]}
-        maxPolarAngle={Math.PI / 2.1}
-        minDistance={300}
+        maxPolarAngle={Math.PI / 2.3}
+        minDistance={150}
         maxDistance={distance * 2}
         enableDamping
         zoomToCursor
+        screenSpacePanning={false}
       />
     </Canvas>
   )
