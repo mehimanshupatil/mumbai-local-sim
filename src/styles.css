@@ -89,3 +89,140 @@ body {
   background: #7b1fa2;
   border-color: #7b1fa2;
 }
+
+.station-card {
+  position: absolute;
+  top: 64px;
+  right: 16px;
+  z-index: 20;
+  width: 300px;
+  background: rgba(13, 17, 26, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 14px 16px;
+  backdrop-filter: blur(6px);
+}
+
+.station-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.station-card h2 {
+  font-size: 17px;
+  flex: 1;
+}
+
+.card-sub {
+  font-size: 13px;
+  color: #9aa4b5;
+  margin-top: 2px;
+}
+
+.halt-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.halt-badge.fast {
+  background: #e0a020;
+  color: #201400;
+}
+
+.card-close {
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  color: #9aa4b5;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.card-close:hover {
+  color: #fff;
+}
+
+.arrivals {
+  list-style: none;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.arrivals li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.svc {
+  width: 30px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 0;
+  border-radius: 4px;
+  background: #efecf1;
+  color: #3d1157;
+}
+
+.svc-fast {
+  background: #e0a020;
+  color: #201400;
+}
+
+.svc-ac {
+  background: #3a7bd5;
+  color: #fff;
+}
+
+.svc-express {
+  background: #77302c;
+  color: #ffe2b0;
+}
+
+.arr-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.arr-dest {
+  flex: 1;
+  color: #c6cdd8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.arr-eta {
+  color: #9aa4b5;
+  font-variant-numeric: tabular-nums;
+}
+
+.arr-none {
+  color: #9aa4b5;
+}
+
+.follow-hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(13, 17, 26, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #c6cdd8;
+  pointer-events: none;
+}

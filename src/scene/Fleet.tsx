@@ -60,17 +60,21 @@ export function Fleet({
   heightfield,
   timetables,
   night,
+  onSelectTrain,
 }: {
   network: NetworkData
   projection: Projection
   heightfield: Heightfield
   timetables: Timetable[]
   night: number
+  onSelectTrain: (trainId: string) => void
 }) {
   const bodyRef = useRef<InstancedMesh>(null)
   const stripeRef = useRef<InstancedMesh>(null)
   const lightRef = useRef<InstancedMesh>(null)
   const dummy = useMemo(() => new Object3D(), [])
+  /** Service id per drawn rake slot, refreshed every frame for click picking. */
+  const rakeIds = useRef<string[]>([])
 
   const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
   const sections = network.sections
@@ -131,8 +135,10 @@ export function Fleet({
       dummy.rotation.set(0, nose.angleRad, 0)
       dummy.updateMatrix()
       lights.setMatrixAt(rake, dummy.matrix)
+      rakeIds.current[rake] = state.id
       rake++
     }
+    rakeIds.current.length = rake
     bodies.count = n
     stripes.count = n
     lights.count = night > 0.25 ? rake : 0
@@ -145,7 +151,17 @@ export function Fleet({
 
   return (
     <group>
-      <instancedMesh ref={bodyRef} args={[undefined, undefined, MAX_RAKES * COACHES]} frustumCulled={false}>
+      <instancedMesh
+        ref={bodyRef}
+        args={[undefined, undefined, MAX_RAKES * COACHES]}
+        frustumCulled={false}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (e.instanceId === undefined) return
+          const id = rakeIds.current[Math.floor(e.instanceId / COACHES)]
+          if (id) onSelectTrain(id)
+        }}
+      >
         <boxGeometry args={[BODY_W, BODY_H, COACH_LENGTH_SCENE_M]} />
         <meshStandardMaterial />
       </instancedMesh>

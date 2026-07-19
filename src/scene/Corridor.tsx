@@ -1,5 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { Billboard, Line, Text } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
+import type { Group } from 'three'
 import type { NetworkData } from '../data/network-types'
 import { TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
@@ -17,11 +19,13 @@ export function Corridor({
   projection,
   heightfield,
   night,
+  onSelectStation,
 }: {
   network: NetworkData
   projection: Projection
   heightfield: Heightfield
   night: number
+  onSelectStation: (stationId: string) => void
 }) {
   const tracks = useMemo(
     () =>
@@ -46,6 +50,7 @@ export function Corridor({
             fastHalt={s.fastHalt}
             position={[x, heightfield.railY(x, z), z]}
             night={night}
+            onSelect={() => onSelectStation(s.id)}
           />
         )
       })}
@@ -58,15 +63,34 @@ function StationMarker({
   fastHalt,
   position: [x, y, z],
   night,
+  onSelect,
 }: {
   name: string
   fastHalt: boolean
   position: [number, number, number]
   night: number
+  onSelect: () => void
 }) {
   const color = fastHalt ? FAST_HALT_COLOR : STATION_COLOR
+  const ref = useRef<Group>(null)
+  useFrame(({ camera }) => {
+    // Markers are sized for corridor-level views; shrink them as the camera
+    // closes in so they don't tower over ground-level chase shots.
+    const g = ref.current
+    if (!g) return
+    const dist = camera.position.distanceTo(g.position)
+    const s = Math.min(1, Math.max(0.06, dist / 12000))
+    g.scale.setScalar(s)
+  })
   return (
-    <group position={[x, y, z]}>
+    <group
+      ref={ref}
+      position={[x, y, z]}
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelect()
+      }}
+    >
       <mesh position={[0, 150, 0]}>
         <cylinderGeometry args={[18, 18, 300]} />
         <meshStandardMaterial color={color} />

@@ -1,27 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { MapControls, Sky, Stars } from '@react-three/drei'
-import westernJson from '../data/western.json'
-import type { NetworkData } from '../data/network-types'
-import { syntheticScheduler } from '../sim/scheduler'
-import { buildTimetable } from '../sim/simulate'
+import { network, timetables, type Focus } from '../app-data'
+import { CameraRig, type ControlsLike } from './CameraRig'
 import { Corridor } from './Corridor'
 import { useSimDaylight } from './daylight'
 import { Fleet } from './Fleet'
 import { loadHeightfield, type Heightfield } from './heightfield'
 import { createProjection } from './projection'
 import { SimClockDriver } from './sim-clock'
+import { buildTrainTrack } from './track-geometry'
 import { Terrain } from './Terrain'
-
-const network = westernJson as NetworkData
 
 const FOV_DEG = 45
 
-// The full synthetic day of services, expanded to timetables once at load.
-const timetables = syntheticScheduler(network).map((def) => buildTimetable(network, def))
-
-export function Scene() {
+export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) => void }) {
   const projection = useMemo(() => createProjection(network), [])
+  const pointerDownAt = useRef<[number, number] | null>(null)
+  const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [projection])
+  const controlsRef = useRef<React.ComponentRef<typeof MapControls> | null>(null)
   const daylight = useSimDaylight()
   const [heightfield, setHeightfield] = useState<Heightfield | null>(null)
   useEffect(() => {
@@ -55,6 +52,13 @@ export function Scene() {
         near: 50,
         far: distance * 6,
       }}
+      onPointerDown={(e) => (pointerDownAt.current = [e.clientX, e.clientY])}
+      onPointerMissed={(e) => {
+        // A drag that ends off-target is navigation, not a click-away.
+        const d = pointerDownAt.current
+        if (d && Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 8) return
+        onFocus({ mode: 'free' })
+      }}
     >
       <color attach="background" args={[daylight.skyColor]} />
       <Sky sunPosition={daylight.skySunPos} distance={distance * 4} />
@@ -76,6 +80,7 @@ export function Scene() {
             projection={projection}
             heightfield={heightfield}
             night={daylight.night}
+            onSelectStation={(stationId) => onFocus({ mode: 'station', stationId })}
           />
           <SimClockDriver />
           <Fleet
@@ -84,12 +89,25 @@ export function Scene() {
             heightfield={heightfield}
             timetables={timetables}
             night={daylight.night}
+            onSelectTrain={(trainId) => onFocus({ mode: 'follow', trainId })}
+          />
+          <CameraRig
+            focus={focus}
+            onFocus={onFocus}
+            // MapControls satisfies the rig's narrow enabled+target slice.
+            controls={controlsRef as React.RefObject<ControlsLike | null>}
+            network={network}
+            projection={projection}
+            heightfield={heightfield}
+            timetables={timetables}
+            track={centerTrack}
           />
         </>
       )}
       {/* Google-Maps-style navigation: drag pans along the ground, right-drag
           (or two fingers) rotates/tilts, wheel zooms toward the cursor. */}
       <MapControls
+        ref={controlsRef}
         makeDefault
         target={[cx, 0, cz]}
         maxPolarAngle={Math.PI / 2.3}
