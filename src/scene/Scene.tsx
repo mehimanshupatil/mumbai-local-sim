@@ -9,6 +9,7 @@ import { Fleet } from './Fleet'
 import { loadHeightfield, type Heightfield } from './heightfield'
 import { createProjection } from './projection'
 import { SimClockDriver } from './sim-clock'
+import { StationDressing } from './StationDressing'
 import { buildTrainTrack } from './track-geometry'
 import { Terrain } from './Terrain'
 
@@ -75,6 +76,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       {heightfield && (
         <>
           <Terrain heightfield={heightfield} projection={projection} />
+          <StationDressing network={network} projection={projection} heightfield={heightfield} />
           <Corridor
             network={network}
             projection={projection}

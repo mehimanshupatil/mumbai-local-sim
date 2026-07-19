@@ -73,6 +73,7 @@ function StationMarker({
 }) {
   const color = fastHalt ? FAST_HALT_COLOR : STATION_COLOR
   const ref = useRef<Group>(null)
+  const labelRef = useRef<Group>(null)
   useFrame(({ camera }) => {
     // Markers are sized for corridor-level views; shrink them as the camera
     // closes in so they don't tower over ground-level chase shots.
@@ -81,6 +82,9 @@ function StationMarker({
     const dist = camera.position.distanceTo(g.position)
     const s = Math.min(1, Math.max(0.06, dist / 12000))
     g.scale.setScalar(s)
+    // Close up, the yellow station board takes over from the floating label.
+    const label = labelRef.current
+    if (label) label.scale.setScalar(Math.min(1, Math.max(0, (dist - 4000) / 8000)))
   })
   return (
     <group
@@ -100,7 +104,7 @@ function StationMarker({
         <sphereGeometry args={[55]} />
         <meshStandardMaterial color={color} emissive="#ffe9b0" emissiveIntensity={night * 1.6} />
       </mesh>
-      <Billboard position={[0, 520, 0]}>
+      <Billboard ref={labelRef} position={[0, 520, 0]}>
         {/* Labels skip the depth test: troika text z-flickers against the
             logarithmic depth buffer on some GPUs, and terrain should never
             occlude a station name anyway. */}

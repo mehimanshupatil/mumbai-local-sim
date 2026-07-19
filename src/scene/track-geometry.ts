@@ -3,7 +3,7 @@
  * section yields `tracks` parallel offset copies of the corridor centerline.
  * Pure geometry — no three.js or React.
  */
-import type { NetworkData } from '../data/network-types'
+import type { NetworkData, TrackSection } from '../data/network-types'
 import type { Projection } from './projection'
 
 export interface TrackPolyline {
@@ -70,6 +70,12 @@ export function offsetPolyline(points: [number, number][], d: number): [number, 
     const len = Math.hypot(dx, dy) || 1
     return [p[0] + (-dy / len) * d, p[1] + (dx / len) * d]
   })
+}
+
+/** The track section containing a baked chainage. */
+export function sectionAtChainage(sections: TrackSection[], chainageM: number): TrackSection {
+  for (const s of sections) if (chainageM < s.toM) return s
+  return sections[sections.length - 1]
 }
 
 /** A polyline a train can be posed on by baked chainage. */

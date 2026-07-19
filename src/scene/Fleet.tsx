@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Color, InstancedMesh, Object3D } from 'three'
-import type { NetworkData, TrackSection } from '../data/network-types'
+import type { NetworkData } from '../data/network-types'
 import { trainStates, type Timetable } from '../sim/simulate'
 import {
   TRACK_EXPRESS_DOWN,
@@ -14,7 +14,7 @@ import { COACH_GAP_SCENE_M, COACH_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } from '
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import { simClock } from './sim-clock'
-import { buildTrainTrack, poseAt } from './track-geometry'
+import { buildTrainTrack, poseAt, sectionAtChainage } from './track-geometry'
 
 const COACHES = 12
 const BODY_W = 18
@@ -103,7 +103,7 @@ export function Fleet({
     for (const state of states) {
       if (n >= MAX_RAKES * COACHES) break
       const livery = LIVERY[state.serviceType]
-      const section = sectionAt(sections, state.chainageM)
+      const section = sectionAtChainage(sections, state.chainageM)
       const lane = laneFor(state.track, section.tracks)
       const lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M
       const dirSign = state.direction === 'down' ? 1 : -1
@@ -182,9 +182,3 @@ export function Fleet({
   )
 }
 
-function sectionAt(sections: TrackSection[], chainageM: number): TrackSection {
-  for (const s of sections) {
-    if (chainageM < s.toM) return s
-  }
-  return sections[sections.length - 1]
-}
