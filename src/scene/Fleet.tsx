@@ -59,14 +59,17 @@ export function Fleet({
   projection,
   heightfield,
   timetables,
+  night,
 }: {
   network: NetworkData
   projection: Projection
   heightfield: Heightfield
   timetables: Timetable[]
+  night: number
 }) {
   const bodyRef = useRef<InstancedMesh>(null)
   const stripeRef = useRef<InstancedMesh>(null)
+  const lightRef = useRef<InstancedMesh>(null)
   const dummy = useMemo(() => new Object3D(), [])
 
   const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
@@ -84,13 +87,15 @@ export function Fleet({
   useFrame(() => {
     const bodies = bodyRef.current
     const stripes = stripeRef.current
-    if (!bodies || !stripes) return
+    const lights = lightRef.current
+    if (!bodies || !stripes || !lights) return
     const states = trainStates(timetables, simClock.t)
     if (states.length > MAX_RAKES && !warnedCapacity) {
       warnedCapacity = true
       console.warn(`Fleet: ${states.length} concurrent rakes exceed capacity ${MAX_RAKES}; truncating`)
     }
     let n = 0
+    let rake = 0
     for (const state of states) {
       if (n >= MAX_RAKES * COACHES) break
       const livery = LIVERY[state.serviceType]
@@ -114,11 +119,26 @@ export function Fleet({
         stripes.setColorAt(n, livery.stripe)
         n++
       }
+      // Headlight at the rake nose, facing travel.
+      const nose = poseAt(centerTrack, state.chainageM)
+      const nx = -Math.cos(nose.angleRad)
+      const nz = Math.sin(nose.angleRad)
+      dummy.position.set(
+        nose.x + nx * lateral,
+        heightfield.railY(nose.x + nx * lateral, nose.z + nz * lateral) + BODY_H * 0.35,
+        nose.z + nz * lateral,
+      )
+      dummy.rotation.set(0, nose.angleRad, 0)
+      dummy.updateMatrix()
+      lights.setMatrixAt(rake, dummy.matrix)
+      rake++
     }
     bodies.count = n
     stripes.count = n
+    lights.count = night > 0.25 ? rake : 0
     bodies.instanceMatrix.needsUpdate = true
     stripes.instanceMatrix.needsUpdate = true
+    lights.instanceMatrix.needsUpdate = true
     if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true
     if (stripes.instanceColor) stripes.instanceColor.needsUpdate = true
   })
@@ -129,13 +149,18 @@ export function Fleet({
         <boxGeometry args={[BODY_W, BODY_H, COACH_LENGTH_SCENE_M]} />
         <meshStandardMaterial />
       </instancedMesh>
+      {/* the waist band doubles as the lit window strip after dark */}
       <instancedMesh
         ref={stripeRef}
         args={[undefined, undefined, MAX_RAKES * COACHES]}
         frustumCulled={false}
       >
         <boxGeometry args={[BODY_W + 1, BODY_H * 0.28, COACH_LENGTH_SCENE_M + 1]} />
-        <meshStandardMaterial />
+        <meshStandardMaterial emissive="#ffca7a" emissiveIntensity={night * 1.4} />
+      </instancedMesh>
+      <instancedMesh ref={lightRef} args={[undefined, undefined, MAX_RAKES]} frustumCulled={false}>
+        <boxGeometry args={[BODY_W * 0.7, BODY_H * 0.35, 6]} />
+        <meshStandardMaterial emissive="#fff3c4" emissiveIntensity={3} color="#3a3a30" />
       </instancedMesh>
     </group>
   )

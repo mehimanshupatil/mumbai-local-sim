@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Sky } from '@react-three/drei'
+import { OrbitControls, Sky, Stars } from '@react-three/drei'
 import westernJson from '../data/western.json'
 import type { NetworkData } from '../data/network-types'
 import { syntheticScheduler } from '../sim/scheduler'
 import { buildTimetable } from '../sim/simulate'
 import { Corridor } from './Corridor'
+import { useSimDaylight } from './daylight'
 import { Fleet } from './Fleet'
 import { loadHeightfield, type Heightfield } from './heightfield'
 import { createProjection } from './projection'
@@ -21,6 +22,7 @@ const timetables = syntheticScheduler(network).map((def) => buildTimetable(netwo
 
 export function Scene() {
   const projection = useMemo(() => createProjection(network), [])
+  const daylight = useSimDaylight()
   const [heightfield, setHeightfield] = useState<Heightfield | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -54,19 +56,34 @@ export function Scene() {
         far: distance * 6,
       }}
     >
-      <Sky sunPosition={[100, 60, 100]} distance={distance * 4} />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[50000, 80000, 30000]} intensity={1.2} />
+      <color attach="background" args={[daylight.skyColor]} />
+      <Sky sunPosition={daylight.skySunPos} distance={distance * 4} />
+      {daylight.night > 0.5 && (
+        <Stars radius={distance * 2} depth={distance} count={2500} factor={800} fade />
+      )}
+      <ambientLight color={daylight.ambientColor} intensity={daylight.ambientIntensity} />
+      {/* Directional light aims at the origin — the projection is corridor-centred. */}
+      <directionalLight
+        position={[daylight.sunPos[0] * 600, daylight.sunPos[1] * 600, daylight.sunPos[2] * 600]}
+        color={daylight.sunColor}
+        intensity={daylight.sunIntensity}
+      />
       {heightfield && (
         <>
           <Terrain heightfield={heightfield} projection={projection} />
-          <Corridor network={network} projection={projection} heightfield={heightfield} />
+          <Corridor
+            network={network}
+            projection={projection}
+            heightfield={heightfield}
+            night={daylight.night}
+          />
           <SimClockDriver />
           <Fleet
             network={network}
             projection={projection}
             heightfield={heightfield}
             timetables={timetables}
+            night={daylight.night}
           />
         </>
       )}

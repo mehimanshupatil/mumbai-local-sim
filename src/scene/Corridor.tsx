@@ -16,10 +16,12 @@ export function Corridor({
   network,
   projection,
   heightfield,
+  night,
 }: {
   network: NetworkData
   projection: Projection
   heightfield: Heightfield
+  night: number
 }) {
   const tracks = useMemo(
     () =>
@@ -43,6 +45,7 @@ export function Corridor({
             name={s.name}
             fastHalt={s.fastHalt}
             position={[x, heightfield.railY(x, z), z]}
+            night={night}
           />
         )
       })}
@@ -54,10 +57,12 @@ function StationMarker({
   name,
   fastHalt,
   position: [x, y, z],
+  night,
 }: {
   name: string
   fastHalt: boolean
   position: [number, number, number]
+  night: number
 }) {
   const color = fastHalt ? FAST_HALT_COLOR : STATION_COLOR
   return (
@@ -66,9 +71,10 @@ function StationMarker({
         <cylinderGeometry args={[18, 18, 300]} />
         <meshStandardMaterial color={color} />
       </mesh>
+      {/* the marker head doubles as the platform lamp after dark */}
       <mesh position={[0, 330, 0]}>
         <sphereGeometry args={[55]} />
-        <meshStandardMaterial color={color} />
+        <meshStandardMaterial color={color} emissive="#ffe9b0" emissiveIntensity={night * 1.6} />
       </mesh>
       <Billboard position={[0, 520, 0]}>
         {/* Labels skip the depth test: troika text z-flickers against the
