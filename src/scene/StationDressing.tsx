@@ -10,9 +10,10 @@ import {
   Vector3,
 } from 'three'
 import type { NetworkData } from '../data/network-types'
-import { TRACK_SPACING_SCENE_M } from './config'
+import { IS_COARSE_POINTER, TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
+import { FONT_EN, FONT_MR } from './fonts'
 import { buildTrainTrack, poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
 
 const BALLAST_MARGIN_M = 22
@@ -24,7 +25,7 @@ const PLATFORM_COLOR = '#8f8a84'
 const BOARD_W = 210
 const BOARD_H = 56
 const BOARD_Y = 150
-const BUILDINGS_PER_STATION = 24
+const BUILDINGS_PER_STATION = IS_COARSE_POINTER ? 8 : 24
 
 /** Deterministic PRNG so the city never reshuffles between loads. */
 function mulberry32(seed: number) {
@@ -181,8 +182,6 @@ export function StationDressing({
     return { matrices, colors }
   }, [stations, heightfield])
 
-  const devanagariFont = `${import.meta.env.BASE_URL}fonts/NotoSansDevanagari-Regular.ttf`
-
   return (
     <group>
       <mesh geometry={ballast}>
@@ -213,6 +212,7 @@ export function StationDressing({
           </mesh>
           <Text
             position={[0, 10, 0.5]}
+            font={FONT_EN}
             fontSize={24}
             color="#151208"
             anchorY="middle"
@@ -223,7 +223,7 @@ export function StationDressing({
           </Text>
           <Text
             position={[0, -14, 0.5]}
-            font={devanagariFont}
+            font={FONT_MR}
             fontSize={17}
             color="#151208"
             anchorY="middle"

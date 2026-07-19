@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber'
 import { MapControls, Sky, Stars } from '@react-three/drei'
 import { network, timetables, type Focus } from '../app-data'
 import { CameraRig, type ControlsLike } from './CameraRig'
+import { IS_COARSE_POINTER } from './config'
 import { Corridor } from './Corridor'
 import { useSimDaylight } from './daylight'
 import { Fleet } from './Fleet'
@@ -47,6 +48,9 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       // 120 km of coastal plain metres from a 190 km camera: the standard
       // depth buffer z-fights sea against low-lying land.
       gl={{ logarithmicDepthBuffer: true }}
+      // Desktop keeps r3f's default pixel ratio (forcing full retina 2.0
+      // costs half the frame rate); coarse-pointer devices clamp lower.
+      {...(IS_COARSE_POINTER ? { dpr: [1, 1.5] as [number, number] } : {})}
       camera={{
         position: [cx, distance, cz + distance * 0.25],
         fov: FOV_DEG,

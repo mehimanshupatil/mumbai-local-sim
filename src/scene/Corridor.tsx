@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber'
 import type { Group } from 'three'
 import type { NetworkData } from '../data/network-types'
 import { TRACK_SPACING_SCENE_M } from './config'
+import { FONT_EN } from './fonts'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import { buildTrackPolylines } from './track-geometry'
@@ -109,6 +110,7 @@ function StationMarker({
             logarithmic depth buffer on some GPUs, and terrain should never
             occlude a station name anyway. */}
         <Text
+          font={FONT_EN}
           fontSize={220}
           color="#ffffff"
           outlineWidth={12}

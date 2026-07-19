@@ -21,6 +21,9 @@ const BODY_W = 18
 const BODY_H = 18
 /** Instance capacity — plenty above the ~70 concurrent rakes at peak. */
 const MAX_RAKES = 128
+/** Rakes fatten up to BULK_MAX x as the camera passes BULK_DISTANCE_M away. */
+const BULK_DISTANCE_M = 25000
+const BULK_MAX = 3.5
 let warnedCapacity = false
 
 /** Liveries by service type: rake body and waist-band colors. */
@@ -88,7 +91,7 @@ export function Fleet({
     [],
   )
 
-  useFrame(() => {
+  useFrame(({ camera }) => {
     const bodies = bodyRef.current
     const stripes = stripeRef.current
     const lights = lightRef.current
@@ -107,6 +110,16 @@ export function Fleet({
       const lane = laneFor(state.track, section.tracks)
       const lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M
       const dirSign = state.direction === 'down' ? 1 : -1
+      // Extra width/height exaggeration as the camera pulls away, so rakes
+      // stay readable over the whole corridor but sit true at station level.
+      const nose = poseAt(centerTrack, state.chainageM)
+      const noseY = heightfield.railY(nose.x, nose.z)
+      const camDist = Math.hypot(
+        camera.position.x - nose.x,
+        camera.position.y - noseY,
+        camera.position.z - nose.z,
+      )
+      const bulk = Math.min(BULK_MAX, Math.max(1, camDist / BULK_DISTANCE_M))
       for (let c = 0; c < COACHES; c++) {
         const pose = poseAt(centerTrack, state.chainageM, -dirSign * coachOffsets[c])
         // Same normal convention as offsetPolyline: left of travel = (-dz, dx).
@@ -114,8 +127,9 @@ export function Fleet({
         const nz = Math.sin(pose.angleRad)
         const px = pose.x + nx * lateral
         const pz = pose.z + nz * lateral
-        dummy.position.set(px, heightfield.railY(px, pz) + BODY_H / 2, pz)
+        dummy.position.set(px, heightfield.railY(px, pz) + (BODY_H * bulk) / 2, pz)
         dummy.rotation.set(0, pose.angleRad, 0)
+        dummy.scale.set(bulk, bulk, 1)
         dummy.updateMatrix()
         bodies.setMatrixAt(n, dummy.matrix)
         stripes.setMatrixAt(n, dummy.matrix)
@@ -123,16 +137,16 @@ export function Fleet({
         stripes.setColorAt(n, livery.stripe)
         n++
       }
-      // Headlight at the rake nose, facing travel.
-      const nose = poseAt(centerTrack, state.chainageM)
+      // Headlight at the rake nose, facing travel, bulked like its coaches.
       const nx = -Math.cos(nose.angleRad)
       const nz = Math.sin(nose.angleRad)
       dummy.position.set(
         nose.x + nx * lateral,
-        heightfield.railY(nose.x + nx * lateral, nose.z + nz * lateral) + BODY_H * 0.35,
+        heightfield.railY(nose.x + nx * lateral, nose.z + nz * lateral) + BODY_H * bulk * 0.35,
         nose.z + nz * lateral,
       )
       dummy.rotation.set(0, nose.angleRad, 0)
+      dummy.scale.set(bulk, bulk, 1)
       dummy.updateMatrix()
       lights.setMatrixAt(rake, dummy.matrix)
       rakeIds.current[rake] = state.id

@@ -24,3 +24,10 @@ export const TERRAIN_EXAGGERATION = 2.5
 
 /** Scene Y of the sea surface (slightly above the 0 m seabed contour). */
 export const SEA_LEVEL_Y = 0.4
+
+/**
+ * Desktop-first: coarse-pointer devices get reduced pixel ratio and building
+ * density, same UI.
+ */
+export const IS_COARSE_POINTER =
+  typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
