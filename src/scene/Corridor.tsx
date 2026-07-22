@@ -77,15 +77,19 @@ function StationMarker({
   const labelRef = useRef<Group>(null)
   useFrame(({ camera }) => {
     // Markers are sized for corridor-level views; shrink them as the camera
-    // closes in so they don't tower over ground-level chase shots.
+    // closes in (they stay as the station's click target, so never to zero).
     const g = ref.current
     if (!g) return
     const dist = camera.position.distanceTo(g.position)
-    const s = Math.min(1, Math.max(0.06, dist / 12000))
-    g.scale.setScalar(s)
-    // Close up, the yellow station board takes over from the floating label.
+    g.scale.setScalar(Math.min(1, Math.max(0.06, dist / 12000)))
+    // Close up the yellow board takes over from the floating label; far out,
+    // minor-station labels yield so the dense south corridor doesn't smear.
     const label = labelRef.current
-    if (label) label.scale.setScalar(Math.min(1, Math.max(0, (dist - 4000) / 8000)))
+    if (label) {
+      const near = Math.min(1, Math.max(0, (dist - 4000) / 8000))
+      const far = fastHalt ? 1 : Math.min(1, Math.max(0, (45000 - dist) / 10000))
+      label.scale.setScalar(near * far)
+    }
   })
   return (
     <group

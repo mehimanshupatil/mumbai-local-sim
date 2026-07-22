@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Color, InstancedMesh, Object3D } from 'three'
+import { BoxGeometry, Color, InstancedMesh, Object3D } from 'three'
 import type { NetworkData } from '../data/network-types'
 import { trainStates, type Timetable } from '../sim/simulate'
 import {
@@ -24,6 +24,23 @@ const MAX_RAKES = 128
 /** Rakes fatten up to BULK_MAX x as the camera passes BULK_DISTANCE_M away. */
 const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
+const NOSE_L = 14
+const RAKE_LEN = COACHES * (COACH_LENGTH_SCENE_M + COACH_GAP_SCENE_M) - COACH_GAP_SCENE_M
+
+/** A box tapered toward +z: the EMU cab nose. */
+function noseGeometry(): BoxGeometry {
+  const geo = new BoxGeometry(BODY_W, BODY_H * 0.9, NOSE_L)
+  const pos = geo.attributes.position
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getZ(i) > 0) {
+      pos.setX(i, pos.getX(i) * 0.55)
+      pos.setY(i, pos.getY(i) * 0.72)
+    }
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+  return geo
+}
 let warnedCapacity = false
 
 /** Liveries by service type: rake body and waist-band colors. */
@@ -75,7 +92,9 @@ export function Fleet({
   const bodyRef = useRef<InstancedMesh>(null)
   const stripeRef = useRef<InstancedMesh>(null)
   const lightRef = useRef<InstancedMesh>(null)
+  const noseRef = useRef<InstancedMesh>(null)
   const dummy = useMemo(() => new Object3D(), [])
+  const noseGeo = useMemo(() => noseGeometry(), [])
   /** Service id per drawn rake slot, refreshed every frame for click picking. */
   const rakeIds = useRef<string[]>([])
 
@@ -95,7 +114,8 @@ export function Fleet({
     const bodies = bodyRef.current
     const stripes = stripeRef.current
     const lights = lightRef.current
-    if (!bodies || !stripes || !lights) return
+    const noses = noseRef.current
+    if (!bodies || !stripes || !lights || !noses) return
     const states = trainStates(timetables, simClock.t)
     if (states.length > MAX_RAKES && !warnedCapacity) {
       warnedCapacity = true
@@ -137,18 +157,36 @@ export function Fleet({
         stripes.setColorAt(n, livery.stripe)
         n++
       }
-      // Headlight at the rake nose, facing travel, bulked like its coaches.
-      const nx = -Math.cos(nose.angleRad)
-      const nz = Math.sin(nose.angleRad)
+      // Headlight at the tip of the front nose so the cab doesn't occlude it.
+      const tip = poseAt(centerTrack, state.chainageM, dirSign * NOSE_L * 0.9)
+      const tx = -Math.cos(tip.angleRad)
+      const tz = Math.sin(tip.angleRad)
       dummy.position.set(
-        nose.x + nx * lateral,
-        heightfield.railY(nose.x + nx * lateral, nose.z + nz * lateral) + BODY_H * bulk * 0.35,
-        nose.z + nz * lateral,
+        tip.x + tx * lateral,
+        heightfield.railY(tip.x + tx * lateral, tip.z + tz * lateral) + BODY_H * bulk * 0.3,
+        tip.z + tz * lateral,
       )
-      dummy.rotation.set(0, nose.angleRad, 0)
-      dummy.scale.set(bulk, bulk, 1)
+      dummy.rotation.set(0, tip.angleRad, 0)
+      dummy.scale.set(bulk * 0.6, bulk * 0.6, 1)
       dummy.updateMatrix()
       lights.setMatrixAt(rake, dummy.matrix)
+      // Cab noses cap both rake ends, pointing outward along travel.
+      for (const [endOffset, flip] of [
+        [-NOSE_L / 2, 0], // ahead of the leading coach face
+        [RAKE_LEN + NOSE_L / 2, Math.PI], // beyond the trailing face
+      ] as const) {
+        const p = poseAt(centerTrack, state.chainageM, -dirSign * endOffset)
+        const ex = -Math.cos(p.angleRad)
+        const ez = Math.sin(p.angleRad)
+        const px = p.x + ex * lateral
+        const pz = p.z + ez * lateral
+        dummy.position.set(px, heightfield.railY(px, pz) + (BODY_H * bulk * 0.9) / 2, pz)
+        dummy.rotation.set(0, p.angleRad + (dirSign === 1 ? 0 : Math.PI) + flip, 0)
+        dummy.scale.set(bulk, bulk, 1)
+        dummy.updateMatrix()
+        noses.setMatrixAt(rake * 2 + (flip === 0 ? 0 : 1), dummy.matrix)
+        noses.setColorAt(rake * 2 + (flip === 0 ? 0 : 1), livery.body)
+      }
       rakeIds.current[rake] = state.id
       rake++
     }
@@ -156,11 +194,14 @@ export function Fleet({
     bodies.count = n
     stripes.count = n
     lights.count = night > 0.25 ? rake : 0
+    noses.count = rake * 2
     bodies.instanceMatrix.needsUpdate = true
     stripes.instanceMatrix.needsUpdate = true
     lights.instanceMatrix.needsUpdate = true
+    noses.instanceMatrix.needsUpdate = true
     if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true
     if (stripes.instanceColor) stripes.instanceColor.needsUpdate = true
+    if (noses.instanceColor) noses.instanceColor.needsUpdate = true
   })
 
   return (
@@ -191,6 +232,13 @@ export function Fleet({
       <instancedMesh ref={lightRef} args={[undefined, undefined, MAX_RAKES]} frustumCulled={false}>
         <boxGeometry args={[BODY_W * 0.7, BODY_H * 0.35, 6]} />
         <meshStandardMaterial emissive="#fff3c4" emissiveIntensity={3} color="#3a3a30" />
+      </instancedMesh>
+      <instancedMesh
+        ref={noseRef}
+        args={[noseGeo, undefined, MAX_RAKES * 2]}
+        frustumCulled={false}
+      >
+        <meshStandardMaterial />
       </instancedMesh>
     </group>
   )

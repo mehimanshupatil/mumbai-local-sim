@@ -4,6 +4,7 @@
  * movement (simulate.ts) or rendering.
  */
 import type { NetworkData, StationRecord } from '../data/network-types'
+import { buildTimetable } from './simulate'
 import {
   TRACK_EXPRESS_DOWN,
   TRACK_EXPRESS_UP,
@@ -27,6 +28,12 @@ const SERVICE_START_H = 4.5
 const SERVICE_END_H = 24.5
 /** Every Nth slow rake runs as the blue AC variant. */
 const AC_EVERY = 5
+/**
+ * Turnback rotation, matching the real WR mix: Borivali locals dominate,
+ * Virar and Andheri follow, the odd Bhayandar. Fasts run deep only.
+ */
+const SLOW_TERMINI = ['Borivali', 'Virar', 'Andheri', 'Borivali', 'Virar', 'Borivali', 'Bhayandar']
+const FAST_TERMINI = ['Virar', 'Borivali']
 /** Long-distance expresses per hour (each direction). */
 const EXPRESS_INTERVAL_S = 3600
 /** Virar–Dahanu shuttles run half-hourly all day. */
@@ -60,22 +67,60 @@ export const syntheticScheduler: Scheduler = (network) => {
 
   const ids = (list: StationRecord[]) => list.map((s) => s.id)
   const localCorridor = stations.slice(0, virarIdx + 1)
-  const slowStops = ids(localCorridor)
-  const fastStops = ids(localCorridor.filter((s) => s.fastHalt))
   const shuttleStops = ids(stations.slice(virarIdx))
   const expressStops = [stations[bctIdx].id, stations[stations.length - 1].id]
 
+  const indexOfName = (name: string) => {
+    const i = stations.findIndex((s) => s.name === name)
+    if (i < 0) throw new Error(`network is missing terminus ${name}`)
+    return i
+  }
+  const slowStopsTo = (terminus: string) => ids(localCorridor.slice(0, indexOfName(terminus) + 1))
+  const fastStopsTo = (terminus: string) =>
+    ids(localCorridor.slice(0, indexOfName(terminus) + 1).filter((s) => s.fastHalt))
+
   const defs: ServiceDef[] = []
-  /** Emit a down/up pair of the same service shape. */
+  /** End-to-end run seconds for a stop list, so up trains can be timed by arrival. */
+  const runSecondsCache = new Map<string, number>()
+  const runSeconds = (stopIds: string[]) => {
+    const key = stopIds[stopIds.length - 1] + ':' + stopIds.length
+    let s = runSecondsCache.get(key)
+    if (s === undefined) {
+      const tt = buildTimetable(network, {
+        id: 'probe',
+        serviceType: 'slow',
+        direction: 'down',
+        track: 0,
+        departureTime: 0,
+        stopIds,
+      })
+      s = tt.stops[tt.stops.length - 1].arriveT
+      runSecondsCache.set(key, s)
+    }
+    return s
+  }
+  /**
+   * Emit a down/up pair. The down service departs Churchgate at the slot
+   * time; the up service is timed to ARRIVE Churchgate at the slot time, so
+   * southbound spacing through the shared trunk stays even no matter which
+   * terminus each train turned back from.
+   */
   const pair = (
     idPrefix: string,
     i: number,
     template: Omit<ServiceDef, 'id' | 'direction' | 'track'> & { downTrack: number; upTrack: number },
   ) => {
-    const { downTrack, upTrack, stopIds, ...rest } = template
+    const { downTrack, upTrack, stopIds, departureTime, ...rest } = template
     defs.push(
-      { ...rest, id: `${idPrefix}-DN-${i}`, direction: 'down', track: downTrack, stopIds },
-      { ...rest, id: `${idPrefix}-UP-${i}`, direction: 'up', track: upTrack, stopIds: [...stopIds].reverse() },
+      { ...rest, id: `${idPrefix}-DN-${i}`, direction: 'down', track: downTrack, departureTime, stopIds },
+      {
+        ...rest,
+        id: `${idPrefix}-UP-${i}`,
+        direction: 'up',
+        track: upTrack,
+        departureTime: departureTime - runSeconds(stopIds),
+        stopIds: [...stopIds].reverse(),
+      },
     )
   }
 
@@ -86,7 +131,7 @@ export const syntheticScheduler: Scheduler = (network) => {
     pair('S', i, {
       serviceType: slowType,
       departureTime,
-      stopIds: slowStops,
+      stopIds: slowStopsTo(SLOW_TERMINI[i % SLOW_TERMINI.length]),
       downTrack: TRACK_SLOW_DOWN,
       upTrack: TRACK_SLOW_UP,
     })
@@ -94,7 +139,7 @@ export const syntheticScheduler: Scheduler = (network) => {
     pair('F', i, {
       serviceType: 'fast',
       departureTime: departureTime + headwayAt(departureTime) / 2,
-      stopIds: fastStops,
+      stopIds: fastStopsTo(FAST_TERMINI[i % FAST_TERMINI.length]),
       downTrack: TRACK_FAST_DOWN,
       upTrack: TRACK_FAST_UP,
     })

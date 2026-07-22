@@ -125,6 +125,45 @@ describe('synthetic scheduler', () => {
     expect(a.length).toBeGreaterThan(15) // corridor is alive at peak
   })
 
+  it('turns back slow locals at the real mix of termini, Borivali most common', () => {
+    const termini = new Map<string, number>()
+    // Churchgate-origin locals only — Virar–Dahanu shuttles turn back elsewhere.
+    for (const d of slowDown.filter((x) => x.id.startsWith('S-'))) {
+      const last = byId.get(d.stopIds[d.stopIds.length - 1])!.name
+      termini.set(last, (termini.get(last) ?? 0) + 1)
+    }
+    // Real WR pattern: Borivali turnbacks dominate, Virar and Andheri follow.
+    expect(termini.get('Borivali')).toBeGreaterThan(0)
+    expect(termini.get('Virar')).toBeGreaterThan(0)
+    expect(termini.get('Andheri')).toBeGreaterThan(0)
+    expect(termini.get('Borivali')!).toBeGreaterThan(termini.get('Virar')!)
+    expect(termini.get('Borivali')!).toBeGreaterThan(termini.get('Andheri')!)
+    for (const name of termini.keys()) {
+      expect(['Borivali', 'Virar', 'Andheri', 'Bhayandar']).toContain(name)
+    }
+  })
+
+  it('keeps up-direction headways even at Dadar despite mixed origins', () => {
+    const slowUp = defs.filter(
+      (d) => (d.serviceType === 'slow' || d.serviceType === 'ac') && d.direction === 'up' && d.id.startsWith('S-'),
+    )
+    const dadar = network.stations.find((s) => s.name === 'Dadar')!.id
+    const starts = dwellStartsAt(dadar, slowUp, 8.5 * 3600, 9.5 * 3600)
+    expect(starts.length).toBeGreaterThan(2)
+    for (let i = 1; i < starts.length; i++) {
+      expect(Math.abs(starts[i] - starts[i - 1] - 240)).toBeLessThan(60)
+    }
+  })
+
+  it('starts every up service from its matching terminus', () => {
+    const ups = defs.filter((d) => d.direction === 'up' && d.id.startsWith('S-'))
+    for (const d of ups) {
+      const first = byId.get(d.stopIds[0])!.name
+      expect(['Borivali', 'Virar', 'Andheri', 'Bhayandar']).toContain(first)
+      expect(byId.get(d.stopIds[d.stopIds.length - 1])!.name).toBe('Churchgate')
+    }
+  })
+
   it('keeps the corridor north of Virar served', () => {
     const virarM = network.stations.find((s) => s.name === 'Virar')!.chainageM
     const north = defs.filter((d) =>
