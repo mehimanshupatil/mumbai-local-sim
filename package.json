@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bake": "tsx scripts/bake-network.ts",
-    "bake:terrain": "tsx scripts/fetch-terrain.ts"
+    "bake:terrain": "tsx scripts/fetch-terrain.ts",
+    "bake:realtimetable": "tsx scripts/bake-real-timetable.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

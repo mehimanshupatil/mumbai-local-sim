@@ -19,8 +19,10 @@
 
 - `pnpm test` / `pnpm build` (tsc -b + vite) / `pnpm dev`
 - `pnpm bake` — re-bake network JSON from OSM Overpass. Responses cached in `scripts/.cache/` (gitignored); `--refresh` refetches. Bake validates station order, chainage monotonicity, and per-section track counts against known reality and fails loudly on drift.
+- `pnpm bake:realtimetable` — re-bake `src/data/western-real-timetable.json` from official WR Public Time Tables. Two-stage pipeline: `pip install -r scripts/requirements-timetable.txt && python3 scripts/extract-timetable-pdfs.py` globs every PDF in `data/timetable/` and does position-based grid extraction (direction/AC-ness read from each PDF's own header text, not its filename), writing `scripts/.cache/timetable-raw.json`; then `pnpm bake:realtimetable` (TS) maps station names to network ids, repairs known extraction noise, splits round-trip diagrams, classifies each service, and validates before committing. Re-run both whenever WR publishes a new PTT — just drop the new PDF(s) into `data/timetable/`, any filename.
 
 ## Quirks
 
 - pnpm 11: build-script approvals live in `pnpm-workspace.yaml` (`allowBuilds`), not package.json.
 - Track counts genuinely differ per section (4 / 5–6 / 4 / 2 along the corridor); two 4-track gaps inside Mumbai Central–Borivali are real (Harbour line is a separate excluded service; 6th line under construction) and are pinned by tests — don't "fix" them.
+- Real WR fast trains run several distinct calling patterns, not the one idealized skip-list the v1 spec assumed (confirmed baking `western-real-timetable.json`: only ~37% of real fast services match that exact pattern south of Borivali). What holds universally is that every major interchange stays served — see `src/data/western-real-timetable.test.ts`.
