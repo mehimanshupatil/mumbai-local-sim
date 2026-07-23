@@ -8,8 +8,8 @@
  */
 import type { NetworkData } from '../data/network-types'
 import type { SimTime } from './clock'
-import { legProfile, type LegProfile } from './kinematics'
-import type { ServiceDef, TrainState } from './types'
+import { easedLegProfile, legProfile, type LegProfile } from './kinematics'
+import type { Direction, ServiceDef, ServiceType, TrainState } from './types'
 
 /**
  * EMU performance — one profile for all v1 service types. Calibrated against
@@ -29,8 +29,22 @@ interface TimetableStop {
   departT: SimTime
 }
 
+/**
+ * The only fields a built Timetable actually reads back out of its source
+ * (see stateOf below) — deliberately narrower than ServiceDef so a
+ * Timetable can be built from something that isn't one (a real schedule
+ * already carries its own per-stop times, not a single departureTime +
+ * stopIds to expand via kinematics).
+ */
+interface TrainIdentity {
+  id: string
+  serviceType: ServiceType
+  direction: Direction
+  track: number
+}
+
 export interface Timetable {
-  def: ServiceDef
+  def: TrainIdentity
   stops: TimetableStop[]
   /** Motion profile of the leg leaving stop i. */
   legs: LegProfile[]
@@ -65,6 +79,46 @@ export function buildTimetable(network: NetworkData, def: ServiceDef): Timetable
     }
   }
   return { def, stops, legs, endT: stops[stops.length - 1].departT }
+}
+
+export interface RealStop {
+  stationId: string
+  /** Departure at the origin / arrival everywhere else, from the real PTT. */
+  t: SimTime
+}
+
+/**
+ * Build a Timetable directly from a real timetable's known per-stop times
+ * (src/data/western-real-timetable.json) — no kinematics involved, since we
+ * already have the true inter-station duration for every leg. Follows the
+ * same dwell convention as buildTimetable: the origin dwells before its
+ * printed time (treated as departure); every other stop dwells after its
+ * printed time (treated as arrival).
+ */
+export function buildRealTimetable(
+  network: NetworkData,
+  identity: TrainIdentity,
+  realStops: RealStop[],
+  dwellS = DWELL_S,
+): Timetable {
+  const byId = new Map(network.stations.map((s) => [s.id, s]))
+  const stops: TimetableStop[] = realStops.map((s, i) => {
+    const station = byId.get(s.stationId)
+    if (!station) throw new Error(`unknown station id: ${s.stationId}`)
+    return i === 0
+      ? { id: station.id, chainageM: station.chainageM, arriveT: s.t - dwellS, departT: s.t }
+      : { id: station.id, chainageM: station.chainageM, arriveT: s.t, departT: s.t + dwellS }
+  })
+  const legs = stops.slice(0, -1).map((stop, i) => {
+    const next = stops[i + 1]
+    // Guard only — PTT times are printed to the minute, so a tight real gap
+    // is possible in principle, but none of the 19,494 legs in the current
+    // baked data actually reach this floor (checked directly against
+    // src/data/western-real-timetable.json).
+    const durationS = Math.max(5, next.arriveT - stop.departT)
+    return easedLegProfile(Math.abs(next.chainageM - stop.chainageM), durationS)
+  })
+  return { def: identity, stops, legs, endT: stops[stops.length - 1].departT }
 }
 
 /** All trains' states at simTime. Services outside their run window vanish. */

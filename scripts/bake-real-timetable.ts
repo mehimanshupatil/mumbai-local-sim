@@ -174,8 +174,30 @@ function trackFor(serviceType: ServiceType, direction: Direction): number {
   return fast ? TRACK_FAST_UP : TRACK_SLOW_UP
 }
 
+/**
+ * A handful of AC services are printed twice: once inline in the main
+ * DN/UP PTT for context, again in full in the dedicated DN-AC/UP-AC PTT.
+ * Both copies carry identical stop times, so de-duplicate by train number +
+ * direction + the exact stop sequence rather than dropping anything a
+ * genuinely distinct working might share a train number with.
+ */
+function dedupeRawTrains(raw: RawTrain[]): RawTrain[] {
+  const seen = new Set<string>()
+  const out: RawTrain[] = []
+  for (const train of raw) {
+    const signature = `${train.trainNumber}|${train.direction}|${train.stops
+      .map((s) => `${s.stationId}@${s.timeSeconds}`)
+      .join(',')}`
+    if (seen.has(signature)) continue
+    seen.add(signature)
+    out.push(train)
+  }
+  return out
+}
+
 function main() {
-  const raw: RawTrain[] = JSON.parse(readFileSync(RAW_PATH, 'utf8'))
+  const rawAll: RawTrain[] = JSON.parse(readFileSync(RAW_PATH, 'utf8'))
+  const raw = dedupeRawTrains(rawAll)
   const services: RealService[] = []
   let runsFromReversal = 0
   let stopsRepaired = 0
@@ -221,9 +243,33 @@ function main() {
     })
   }
 
+  // A rare few train numbers cover two genuinely different real workings on
+  // the same PTT (e.g. 92218 is both a 12:13 Virar-origin and a 14:47
+  // Borivali-origin) — not an extraction artifact, WR really printed it
+  // that way. Disambiguate rather than merge or drop either; the count is
+  // logged and gated below so a sudden jump still fails loudly.
+  const seenIds = new Map<string, number>()
+  let idsDisambiguated = 0
+  for (const svc of services) {
+    const n = (seenIds.get(svc.id) ?? 0) + 1
+    seenIds.set(svc.id, n)
+    if (n > 1) {
+      svc.id = `${svc.id}-${n}`
+      idsDisambiguated++
+    }
+  }
+
   // --- validate against known reality before committing ---
   const problems: string[] = []
   if (services.length < 1000) problems.push(`only ${services.length} services — extraction likely regressed`)
+  if (idsDisambiguated > 5) {
+    problems.push(`${idsDisambiguated} duplicate train numbers — expected at most a handful, check for a regression`)
+  }
+  const finalIdCounts = new Map<string, number>()
+  for (const svc of services) finalIdCounts.set(svc.id, (finalIdCounts.get(svc.id) ?? 0) + 1)
+  if ([...finalIdCounts.values()].some((n) => n > 1)) {
+    problems.push('service ids still not unique after disambiguation — this is a bug in the disambiguation step')
+  }
   for (const svc of services) {
     for (let i = 1; i < svc.stops.length; i++) {
       if (svc.stops[i].t <= svc.stops[i - 1].t) {

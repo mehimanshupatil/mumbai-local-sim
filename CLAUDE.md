@@ -13,7 +13,7 @@
 
 - Sim core: unit tests on `trainStates` output — tests read like operations facts (headways, dwell ~30 s, stop sequences, deterministic replay).
 - Baked data: invariant tests over the committed JSON (`src/data/western.test.ts`).
-- Rendering has **no component tests by design** — verify visually: `pnpm dev`, then in the browser console use `window.simClock` (`.t` = seconds since midnight IST, `.speed = 0` to freeze) to park trains for screenshots.
+- Rendering has **no component tests by design** — verify visually: `pnpm dev`, then in the browser console use `window.simClock` (`.t` = seconds since midnight IST, `.speed = 0` to freeze) and `window.setFocus` (DEV only — `{mode: 'station', stationId}` / `{mode: 'follow', trainId}` / `{mode: 'free'}`) to park trains and cameras for screenshots. If the chrome-devtools MCP is unavailable, a one-off Playwright script against the cached Chromium at `~/Library/Caches/ms-playwright/` (find the actual binary path — it moves between `chrome-mac`/`chrome-mac-arm64` and product names across versions) works as a drop-in substitute for navigate/screenshot/console-error checks.
 
 ## Commands
 

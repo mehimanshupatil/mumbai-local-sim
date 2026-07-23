@@ -41,3 +41,26 @@ export function legProfile(distanceM: number, vmaxMps: number, accel: number, de
   }
   return { durationS, at }
 }
+
+/**
+ * A leg over a known real duration (from a real timetable — we already
+ * have the true inter-station time, so there's nothing to derive from
+ * accel/decel physics). Eases in and out with a cubic smoothstep rather
+ * than moving at constant speed, so it still reads as acceleration/braking
+ * rather than a robotic glide.
+ */
+export function easedLegProfile(distanceM: number, durationS: number): LegProfile {
+  if (distanceM <= 0 || durationS <= 0) {
+    return { durationS: Math.max(0, durationS), at: () => ({ distanceM: 0, speedMps: 0 }) }
+  }
+  const at = (tS: number) => {
+    const t = Math.max(0, Math.min(durationS, tS)) / durationS
+    const smoothstep = t * t * (3 - 2 * t)
+    const smoothstepDerivative = (6 * t * (1 - t)) / durationS
+    return {
+      distanceM: distanceM * smoothstep,
+      speedMps: distanceM * smoothstepDerivative,
+    }
+  }
+  return { durationS, at }
+}
