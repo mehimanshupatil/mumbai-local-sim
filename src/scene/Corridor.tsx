@@ -1,19 +1,22 @@
 import { useMemo, useRef } from 'react'
-import { Billboard, Line, Text } from '@react-three/drei'
+import { Billboard, Line } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import type { Group } from 'three'
 import type { NetworkData } from '../data/network-types'
 import { TRACK_SPACING_SCENE_M } from './config'
-import { FONT_EN } from './fonts'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { buildTrackPolylines } from './track-geometry'
+import { buildTrackPolylines, terminusFanStub } from './track-geometry'
+import { WRBoard } from './WRBoard'
 
 /** Track lines float just above the rail formation to avoid z-fighting. */
 const TRACK_LIFT = 0.6
 const TRACK_COLOR = '#4a4f5a'
 const STATION_COLOR = '#7b1fa2'
 const FAST_HALT_COLOR = '#e0a020'
+/** WRBoard's own text is sized for close-up reading (see StationDressing);
+ * scaled up so the floating corridor-level label stays legible from afar. */
+const LABEL_SCALE = 9
 
 export function Corridor({
   network,
@@ -28,15 +31,19 @@ export function Corridor({
   night: number
   onSelectStation: (stationId: string) => void
 }) {
-  const tracks = useMemo(
-    () =>
-      buildTrackPolylines(network, projection, TRACK_SPACING_SCENE_M).map((t) =>
-        t.points.map(
-          ([x, z]) => [x, heightfield.railY(x, z) + TRACK_LIFT, z] as [number, number, number],
-        ),
-      ),
-    [network, projection, heightfield],
-  )
+  const tracks = useMemo(() => {
+    const polylines = buildTrackPolylines(network, projection, TRACK_SPACING_SCENE_M)
+    // Churchgate's tracks are always the first `tracks`-many polylines here,
+    // since buildTrackPolylines walks sections in order starting at chainage 0.
+    const churchgateTracks = network.sections[0].tracks
+    const fan = terminusFanStub(network, projection, TRACK_SPACING_SCENE_M, churchgateTracks)
+    return polylines.map((t, i) => {
+      const stub = i < churchgateTracks ? fan[i] : []
+      return [...stub, ...t.points].map(
+        ([x, z]) => [x, heightfield.railY(x, z) + TRACK_LIFT, z] as [number, number, number],
+      )
+    })
+  }, [network, projection, heightfield])
   return (
     <group>
       {tracks.map((points, i) => (
@@ -48,6 +55,7 @@ export function Corridor({
           <StationMarker
             key={s.id}
             name={s.name}
+            nameMr={s.nameMr}
             fastHalt={s.fastHalt}
             position={[x, heightfield.railY(x, z), z]}
             night={night}
@@ -61,12 +69,14 @@ export function Corridor({
 
 function StationMarker({
   name,
+  nameMr,
   fastHalt,
   position: [x, y, z],
   night,
   onSelect,
 }: {
   name: string
+  nameMr: string
   fastHalt: boolean
   position: [number, number, number]
   night: number
@@ -88,7 +98,7 @@ function StationMarker({
     if (label) {
       const near = Math.min(1, Math.max(0, (dist - 4000) / 8000))
       const far = fastHalt ? 1 : Math.min(1, Math.max(0, (45000 - dist) / 10000))
-      label.scale.setScalar(near * far)
+      label.scale.setScalar(near * far * LABEL_SCALE)
     }
   })
   return (
@@ -110,21 +120,7 @@ function StationMarker({
         <meshStandardMaterial color={color} emissive="#ffe9b0" emissiveIntensity={night * 1.6} />
       </mesh>
       <Billboard ref={labelRef} position={[0, 520, 0]}>
-        {/* Labels skip the depth test: troika text z-flickers against the
-            logarithmic depth buffer on some GPUs, and terrain should never
-            occlude a station name anyway. */}
-        <Text
-          font={FONT_EN}
-          fontSize={220}
-          color="#ffffff"
-          outlineWidth={12}
-          outlineColor="#0b0e14"
-          anchorY="bottom"
-          renderOrder={10}
-          material-depthTest={false}
-        >
-          {name}
-        </Text>
+        <WRBoard name={name} nameMr={nameMr} />
       </Billboard>
     </group>
   )

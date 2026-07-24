@@ -22,9 +22,11 @@ export function nextArrivals(
   stationId: string,
   simTime: SimTime,
   count: number,
+  direction?: Direction,
 ): Arrival[] {
   const out: Arrival[] = []
   for (const tt of timetables) {
+    if (direction && tt.def.direction !== direction) continue
     const stop = tt.stops.find((s) => s.id === stationId)
     if (!stop || stop.departT <= simTime) continue
     out.push({

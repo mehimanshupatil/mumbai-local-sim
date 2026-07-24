@@ -12,6 +12,11 @@ export function formatSimTime(t: SimTime): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+/** Minutes until a future sim time, floored at 0 for anything already due. */
+export function etaMinutes(targetT: SimTime, simTime: SimTime): number {
+  return Math.max(0, Math.round((targetT - simTime) / 60))
+}
+
 const IST_OFFSET_S = 5.5 * 3600
 
 /** IST wall-clock seconds since midnight for a Unix epoch in milliseconds. */

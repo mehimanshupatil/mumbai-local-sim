@@ -15,6 +15,10 @@ export const TRACK_SPACING_SCENE_M = 5 * RENDER_EXAGGERATION
 export const COACH_LENGTH_SCENE_M = 21.3 * 2
 export const COACH_GAP_SCENE_M = 4
 
+/** Platform length, shared by StationDressing (draws it) and Fleet (aligns
+ * a dwelling rake within it). Real WR platforms run ~600-670m for a 12-car halt. */
+export const PLATFORM_LENGTH_SCENE_M = 620
+
 /**
  * Vertical exaggeration for terrain relief. The corridor is coastal plain;
  * without it the Sahyadri foothills east of the line read as noise from a

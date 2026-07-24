@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Billboard, Text } from '@react-three/drei'
+import { Billboard } from '@react-three/drei'
 import {
   BufferAttribute,
   BufferGeometry,
@@ -10,21 +10,22 @@ import {
   Vector3,
 } from 'three'
 import type { NetworkData } from '../data/network-types'
-import { IS_COARSE_POINTER, TRACK_SPACING_SCENE_M } from './config'
+import { IS_COARSE_POINTER, PLATFORM_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { FONT_EN, FONT_MR } from './fonts'
 import { buildTrainTrack, poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
+import { WRBoard } from './WRBoard'
 
 const BALLAST_MARGIN_M = 22
 const BALLAST_COLOR = '#57504a'
-const PLATFORM_L = 620
+const PLATFORM_L = PLATFORM_LENGTH_SCENE_M
 const PLATFORM_W = 32
 const PLATFORM_H = 10
 const PLATFORM_COLOR = '#8f8a84'
-const BOARD_W = 210
-const BOARD_H = 56
 const BOARD_Y = 150
+/** Two platform instances (one each side of the tracks) pushed per station,
+ * in station order — see platformMatrices below. */
+const PLATFORMS_PER_STATION = 2
 const BUILDINGS_PER_STATION = IS_COARSE_POINTER ? 8 : 24
 
 /** Deterministic PRNG so the city never reshuffles between loads. */
@@ -55,8 +56,19 @@ function ballastGeometry(network: NetworkData, track: TrainTrack, heightfield: H
     const nz = dx / len
     const section = sectionAtChainage(network.sections, lengths[i] / scale)
     const half = (section.tracks * TRACK_SPACING_SCENE_M) / 2 + BALLAST_MARGIN_M
-    const y = heightfield.railY(x, z) - 0.8
-    positions.push(x + nx * half, y, z + nz * half, x - nx * half, y, z - nz * half)
+    // Sample height at each edge independently — a 6-track section's edges
+    // sit up to ~97 scene-m either side of the centerline, and terrain
+    // slope over that span means the centerline's height doesn't apply
+    // across the whole cross-section. Using one flat height for both edges
+    // is what caused the bed to visibly part company with the rails on
+    // sloped ground.
+    const rightX = x + nx * half
+    const rightZ = z + nz * half
+    const leftX = x - nx * half
+    const leftZ = z - nz * half
+    const rightY = heightfield.railY(rightX, rightZ) - 0.8
+    const leftY = heightfield.railY(leftX, leftZ) - 0.8
+    positions.push(rightX, rightY, rightZ, leftX, leftY, leftZ)
     if (i > 0) {
       // Wound counter-clockwise seen from above (+y) so the bed isn't culled.
       const a = (i - 1) * 2
@@ -71,6 +83,7 @@ function ballastGeometry(network: NetworkData, track: TrainTrack, heightfield: H
 }
 
 interface StationPose {
+  id: string
   x: number
   z: number
   y: number
@@ -95,10 +108,12 @@ export function StationDressing({
   network,
   projection,
   heightfield,
+  onSelectStation,
 }: {
   network: NetworkData
   projection: Projection
   heightfield: Heightfield
+  onSelectStation: (stationId: string) => void
 }) {
   const track = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
 
@@ -112,6 +127,7 @@ export function StationDressing({
       network.stations.map((s) => {
         const pose = poseAt(track, s.chainageM)
         return {
+          id: s.id,
           x: pose.x,
           z: pose.z,
           y: heightfield.railY(pose.x, pose.z),
@@ -124,7 +140,9 @@ export function StationDressing({
     [network, track, heightfield],
   )
 
-  // Two platforms per station, flanking the outermost tracks.
+  // Two platforms per station, flanking the outermost tracks. Height is
+  // sampled at each platform's own offset position, not the station's
+  // centerline pose — same reasoning as the ballast bed above.
   const platformMatrices = useMemo(() => {
     const out: Matrix4[] = []
     const q = new Quaternion()
@@ -135,17 +153,16 @@ export function StationDressing({
       const nz = Math.sin(s.angleRad)
       q.setFromAxisAngle(up, s.angleRad)
       for (const side of [1, -1]) {
+        const px = s.x + nx * half * side
+        const pz = s.z + nz * half * side
+        const py = heightfield.railY(px, pz)
         out.push(
-          new Matrix4().compose(
-            new Vector3(s.x + nx * half * side, s.y + PLATFORM_H / 2 - 1, s.z + nz * half * side),
-            q,
-            new Vector3(1, 1, 1),
-          ),
+          new Matrix4().compose(new Vector3(px, py + PLATFORM_H / 2 - 1, pz), q, new Vector3(1, 1, 1)),
         )
       }
     }
     return out
-  }, [stations])
+  }, [stations, heightfield])
 
   // Sparse procedural blocks around each station, off the rail corridor.
   const buildingInstances = useMemo(() => {
@@ -191,6 +208,12 @@ export function StationDressing({
         args={[undefined, undefined, platformMatrices.length]}
         ref={applyMatrices(platformMatrices)}
         frustumCulled={false}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (e.instanceId === undefined) return
+          const station = stations[Math.floor(e.instanceId / PLATFORMS_PER_STATION)]
+          if (station) onSelectStation(station.id)
+        }}
       >
         <boxGeometry args={[PLATFORM_W, PLATFORM_H, PLATFORM_L]} />
         <meshStandardMaterial color={PLATFORM_COLOR} roughness={0.9} />
@@ -204,34 +227,15 @@ export function StationDressing({
         <meshStandardMaterial roughness={0.95} />
       </instancedMesh>
       {stations.map((s) => (
-        <Billboard key={s.name} position={[s.x, s.y + BOARD_Y, s.z]}>
-          {/* Classic WR yellow board: EN over Marathi, black on yellow. */}
-          <mesh>
-            <planeGeometry args={[BOARD_W, BOARD_H]} />
-            <meshBasicMaterial color="#f2c40f" />
-          </mesh>
-          <Text
-            position={[0, 10, 0.5]}
-            font={FONT_EN}
-            fontSize={24}
-            color="#151208"
-            anchorY="middle"
-            renderOrder={11}
-            material-depthTest={false}
-          >
-            {s.name}
-          </Text>
-          <Text
-            position={[0, -14, 0.5]}
-            font={FONT_MR}
-            fontSize={17}
-            color="#151208"
-            anchorY="middle"
-            renderOrder={11}
-            material-depthTest={false}
-          >
-            {s.nameMr}
-          </Text>
+        <Billboard
+          key={s.id}
+          position={[s.x, s.y + BOARD_Y, s.z]}
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelectStation(s.id)
+          }}
+        >
+          <WRBoard name={s.name} nameMr={s.nameMr} />
         </Billboard>
       ))}
     </group>

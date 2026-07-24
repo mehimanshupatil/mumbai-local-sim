@@ -129,6 +129,53 @@ export function poseAt(track: TrainTrack, chainageM: number, alongOffsetSceneM =
 }
 
 /**
+ * Decorative rail convergence south of Churchgate (chainage 0, the line's
+ * southern terminus), where the running lines would taper into a real
+ * terminus throat/buffer-stop concourse instead of just stopping. Purely
+ * visual: the taper only starts SAFE_ZONE_M past chainage 0, clear of where
+ * a dwelling rake's overshot nose renders (see Fleet.tsx's refOffset), so it
+ * never crosses a train.
+ */
+export function terminusFanStub(
+  network: NetworkData,
+  projection: Projection,
+  spacingM: number,
+  sectionTracks: number,
+): [number, number][][] {
+  const centerline = network.corridor.map(projection.toScene)
+  const [ox, oz] = centerline[0]
+  const [nx, nz] = centerline[1]
+  const dx = nx - ox
+  const dz = nz - oz
+  const len = Math.hypot(dx, dz) || 1
+  const dirX = dx / len
+  const dirZ = dz / len
+  const normX = -dz / len
+  const normZ = dx / len
+  // Clear of the deepest a dwelling rake's cab nose overshoots south of
+  // Churchgate (~PLATFORM_NOSE_OFFSET_M + NOSE_L, see Fleet.tsx), plus margin.
+  const SAFE_ZONE_M = 340
+  const TAPER_LEN_M = 350
+  const TAPER_STEPS = 4
+  const stubs: [number, number][][] = []
+  for (let t = 0; t < sectionTracks; t++) {
+    const off = (t - (sectionTracks - 1) / 2) * spacingM
+    const stub: [number, number][] = []
+    for (let step = 0; step <= TAPER_STEPS; step++) {
+      // 0 at the deep (fully converged) end, 1 at the safe-zone boundary
+      // (still full spacing) — eased so the convergence reads as a curve
+      // rather than one hard-kinked straight segment.
+      const u = step / TAPER_STEPS
+      const eased = u * u * (3 - 2 * u)
+      const s = SAFE_ZONE_M + TAPER_LEN_M * (1 - u)
+      stub.push([ox - dirX * s + normX * off * eased, oz - dirZ * s + normZ * off * eased])
+    }
+    stubs.push(stub)
+  }
+  return stubs
+}
+
+/**
  * One polyline per running track. Section chainages index the corridor by
  * its own planar length — scene length and baked chainage agree within the
  * projection's distortion (<0.1% over this corridor).

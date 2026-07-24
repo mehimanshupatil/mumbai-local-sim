@@ -80,7 +80,12 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       {heightfield && (
         <>
           <Terrain heightfield={heightfield} projection={projection} />
-          <StationDressing network={network} projection={projection} heightfield={heightfield} />
+          <StationDressing
+            network={network}
+            projection={projection}
+            heightfield={heightfield}
+            onSelectStation={(stationId) => onFocus({ mode: 'station', stationId })}
+          />
           <Corridor
             network={network}
             projection={projection}

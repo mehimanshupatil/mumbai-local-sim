@@ -41,6 +41,16 @@ describe('nextArrivals', () => {
     expect(new Set(arrivals.map((a) => a.direction)).size).toBe(2)
   })
 
+  it('filters to one direction when asked, independent of how busy the other is', () => {
+    const t = 9 * 3600
+    const down = nextArrivals(timetables, dadar, t, 4, 'down')
+    const up = nextArrivals(timetables, dadar, t, 4, 'up')
+    expect(down.length).toBe(4)
+    expect(up.length).toBe(4)
+    expect(down.every((a) => a.direction === 'down')).toBe(true)
+    expect(up.every((a) => a.direction === 'up')).toBe(true)
+  })
+
   it('never lists expresses at a local station they pass through', () => {
     // Expresses run nonstop Mumbai Central → Dahanu; Dadar is passed, not served.
     const arrivals = nextArrivals(timetables, dadar, 9 * 3600, 20)

@@ -10,7 +10,12 @@ import {
   TRACK_FAST_UP,
   type ServiceType,
 } from '../sim/types'
-import { COACH_GAP_SCENE_M, COACH_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } from './config'
+import {
+  COACH_GAP_SCENE_M,
+  COACH_LENGTH_SCENE_M,
+  PLATFORM_LENGTH_SCENE_M,
+  TRACK_SPACING_SCENE_M,
+} from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import { simClock } from './sim-clock'
@@ -26,6 +31,26 @@ const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
 const NOSE_L = 14
 const RAKE_LEN = COACHES * (COACH_LENGTH_SCENE_M + COACH_GAP_SCENE_M) - COACH_GAP_SCENE_M
+/** How close a dwelling rake's nose pulls up to the platform's far edge (in
+ * the direction of travel) — a real driver pulls up as far as the starter
+ * signal allows, not to the platform's midpoint. */
+const PLATFORM_NOSE_MARGIN_M = 15
+const PLATFORM_NOSE_OFFSET_M = PLATFORM_LENGTH_SCENE_M / 2 - PLATFORM_NOSE_MARGIN_M
+/** Below this speed the platform-alignment shift is blended fully in — well
+ * under cruise (VMAX_MPS=15.5 in simulate.ts), so it only kicks in during the
+ * final few metres of braking/accelerating, not the whole approach. */
+const PLATFORM_BLEND_SPEED_MPS = 2.5
+/**
+ * Rake-overlap deconfliction for two trains folded onto the same drawn lane
+ * (no signalling model keeps them apart in time — see laneFor above). Full
+ * push is held across the whole gap range where two ~RAKE_LEN-long bodies
+ * could be overlapping lengthwise, then fades out over NUDGE_FADE_M so it
+ * never pops once they're already clear. Push magnitude is one extra
+ * half-lane each side, enough to clear BODY_W with margin.
+ */
+const NUDGE_FULL_RANGE_M = RAKE_LEN
+const NUDGE_FADE_M = 200
+const NUDGE_MAX_M = TRACK_SPACING_SCENE_M / 2
 
 /** A box tapered toward +z: the EMU cab nose. */
 function noseGeometry(): BoxGeometry {
@@ -121,18 +146,69 @@ export function Fleet({
       warnedCapacity = true
       console.warn(`Fleet: ${states.length} concurrent rakes exceed capacity ${MAX_RAKES}; truncating`)
     }
+    const rakes = states.map((state) => {
+      const section = sectionAtChainage(sections, state.chainageM)
+      return { state, section, lane: laneFor(state.track, section.tracks), nudge: 0 }
+    })
+    // Narrow sections fold several logical lanes onto one drawn lane (see
+    // laneFor above), and there's no block-signalling model keeping same-lane
+    // rakes apart in time — so two can legitimately be scheduled through the
+    // same physical space at once (an overtake with no passing loop to draw
+    // it on). Nudge them sideways while close so they read as two trains
+    // instead of one interpenetrating blob; it fades out once they clear.
+    const laneGroups = new Map<string, typeof rakes>()
+    for (const r of rakes) {
+      if (r.section.tracks >= 6) continue // every semantic lane has its own track; never folded
+      const key = `${r.section.fromM}-${r.lane}`
+      const g = laneGroups.get(key)
+      if (g) g.push(r)
+      else laneGroups.set(key, [r])
+    }
+    // Adjacent pairs only — a third rake caught between two close neighbours
+    // can have its pushes partially cancel. Rare enough at real service
+    // density in a narrow section not to chase further here.
+    for (const group of laneGroups.values()) {
+      if (group.length < 2) continue
+      group.sort((a, b) => a.state.chainageM - b.state.chainageM)
+      for (let i = 1; i < group.length; i++) {
+        const a = group[i - 1]
+        const b = group[i]
+        const gap = b.state.chainageM - a.state.chainageM
+        if (gap >= NUDGE_FULL_RANGE_M + NUDGE_FADE_M) continue
+        const push =
+          gap <= NUDGE_FULL_RANGE_M
+            ? NUDGE_MAX_M
+            : NUDGE_MAX_M * (1 - (gap - NUDGE_FULL_RANGE_M) / NUDGE_FADE_M)
+        a.nudge -= push
+        b.nudge += push
+      }
+    }
     let n = 0
     let rake = 0
-    for (const state of states) {
+    for (const { state, section, lane, nudge } of rakes) {
       if (n >= MAX_RAKES * COACHES) break
       const livery = LIVERY[state.serviceType]
-      const section = sectionAtChainage(sections, state.chainageM)
-      const lane = laneFor(state.track, section.tracks)
-      const lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M
+      const lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M + nudge
       const dirSign = state.direction === 'down' ? 1 : -1
+      // TrainState.chainageM is the rake's leading edge while moving (correct
+      // for a real train's front relative to signals/platforms) — but while
+      // dwelling it equals the station's own chainage exactly, and platforms
+      // are centered on that same point. Left as the nose, the rake (~555
+      // scene-m) would hang ~245 scene-m off the back of a 620 scene-m
+      // platform. Shift the whole rake forward so the nose pulls up near the
+      // platform's far edge instead, same as a real driver would.
+      //
+      // Blended continuously by speed rather than gated on the `dwelling`
+      // boolean: every leg profile eases speed to exactly 0 at arrival and
+      // back up from 0 at departure (see kinematics.ts), so speed is a
+      // continuous proxy for "how settled into the platform is this rake" —
+      // gating on the boolean instead would snap the whole rake forward the
+      // instant dwelling starts, and back the instant it ends.
+      const platformBlend = Math.max(0, Math.min(1, 1 - state.speedMps / PLATFORM_BLEND_SPEED_MPS))
+      const refOffset = dirSign * PLATFORM_NOSE_OFFSET_M * platformBlend
       // Extra width/height exaggeration as the camera pulls away, so rakes
       // stay readable over the whole corridor but sit true at station level.
-      const nose = poseAt(centerTrack, state.chainageM)
+      const nose = poseAt(centerTrack, state.chainageM, refOffset)
       const noseY = heightfield.railY(nose.x, nose.z)
       const camDist = Math.hypot(
         camera.position.x - nose.x,
@@ -141,7 +217,7 @@ export function Fleet({
       )
       const bulk = Math.min(BULK_MAX, Math.max(1, camDist / BULK_DISTANCE_M))
       for (let c = 0; c < COACHES; c++) {
-        const pose = poseAt(centerTrack, state.chainageM, -dirSign * coachOffsets[c])
+        const pose = poseAt(centerTrack, state.chainageM, refOffset - dirSign * coachOffsets[c])
         // Same normal convention as offsetPolyline: left of travel = (-dz, dx).
         const nx = -Math.cos(pose.angleRad)
         const nz = Math.sin(pose.angleRad)
@@ -158,7 +234,7 @@ export function Fleet({
         n++
       }
       // Headlight at the tip of the front nose so the cab doesn't occlude it.
-      const tip = poseAt(centerTrack, state.chainageM, dirSign * NOSE_L * 0.9)
+      const tip = poseAt(centerTrack, state.chainageM, refOffset + dirSign * NOSE_L * 0.9)
       const tx = -Math.cos(tip.angleRad)
       const tz = Math.sin(tip.angleRad)
       dummy.position.set(
@@ -175,7 +251,7 @@ export function Fleet({
         [-NOSE_L / 2, 0], // ahead of the leading coach face
         [RAKE_LEN + NOSE_L / 2, Math.PI], // beyond the trailing face
       ] as const) {
-        const p = poseAt(centerTrack, state.chainageM, -dirSign * endOffset)
+        const p = poseAt(centerTrack, state.chainageM, refOffset - dirSign * endOffset)
         const ex = -Math.cos(p.angleRad)
         const ez = Math.sin(p.angleRad)
         const px = p.x + ex * lateral
@@ -193,7 +269,7 @@ export function Fleet({
     rakeIds.current.length = rake
     bodies.count = n
     stripes.count = n
-    lights.count = night > 0.25 ? rake : 0
+    lights.count = rake
     noses.count = rake * 2
     bodies.instanceMatrix.needsUpdate = true
     stripes.instanceMatrix.needsUpdate = true
@@ -229,9 +305,11 @@ export function Fleet({
         <boxGeometry args={[BODY_W + 1, BODY_H * 0.28, COACH_LENGTH_SCENE_M + 1]} />
         <meshStandardMaterial emissive="#ffca7a" emissiveIntensity={night * 1.4} />
       </instancedMesh>
+      {/* housing always drawn (visible unlit by day); glow fades in with night,
+          same as the window-glow stripe, instead of popping on at a threshold */}
       <instancedMesh ref={lightRef} args={[undefined, undefined, MAX_RAKES]} frustumCulled={false}>
         <boxGeometry args={[BODY_W * 0.7, BODY_H * 0.35, 6]} />
-        <meshStandardMaterial emissive="#fff3c4" emissiveIntensity={3} color="#3a3a30" />
+        <meshStandardMaterial emissive="#fff3c4" emissiveIntensity={night * 3} color="#3a3a30" />
       </instancedMesh>
       <instancedMesh
         ref={noseRef}

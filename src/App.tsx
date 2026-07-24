@@ -7,6 +7,7 @@ declare global {
   }
 }
 import { ClockControls } from './ClockControls'
+import { FollowHint } from './FollowHint'
 import { Scene } from './scene/Scene'
 import { StationCard } from './StationCard'
 
@@ -37,9 +38,7 @@ export function App() {
       {focus.mode === 'station' && (
         <StationCard stationId={focus.stationId} onClose={() => setFocus({ mode: 'free' })} />
       )}
-      {focus.mode === 'follow' && (
-        <div className="follow-hint">Following {focus.trainId} — Esc or click away to release</div>
-      )}
+      {focus.mode === 'follow' && <FollowHint trainId={focus.trainId} />}
     </div>
   )
 }
