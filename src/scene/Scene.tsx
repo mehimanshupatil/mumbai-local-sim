@@ -79,7 +79,12 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       />
       {heightfield && (
         <>
-          <Terrain heightfield={heightfield} projection={projection} />
+          <Terrain
+            heightfield={heightfield}
+            projection={projection}
+            daylight={daylight}
+            corridor={centerTrack.points}
+          />
           <StationDressing
             network={network}
             projection={projection}

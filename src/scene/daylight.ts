@@ -24,7 +24,8 @@ export interface Daylight {
 }
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
-const smooth = (a: number, b: number, x: number) => {
+/** Cubic-Hermite smoothstep, shared with Terrain's urban-tint falloff. */
+export const smooth = (a: number, b: number, x: number) => {
   const t = clamp01((x - a) / (b - a))
   return t * t * (3 - 2 * t)
 }

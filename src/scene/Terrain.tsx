@@ -1,8 +1,11 @@
 import { useMemo } from 'react'
 import { BufferAttribute, BufferGeometry, Color } from 'three'
 import { SEA_LEVEL_Y, TERRAIN_EXAGGERATION } from './config'
+import type { Daylight } from './daylight'
+import { smooth } from './daylight'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
+import { WaterMaterial } from './WaterMaterial'
 
 /** Grid decimation: 1 = full heightfield resolution. */
 const STRIDE = 2
@@ -31,8 +34,62 @@ function rampColor(h: number): Color {
   return new Color(lo[1]).lerp(new Color(hi[1]), t)
 }
 
+/**
+ * Built-up tint blended atop the elevation ramp near the corridor — real
+ * suburban Mumbai is dense trackside and fades to open land within a few
+ * hundred metres. Distance found via a spatial grid over corridor points
+ * (cell size = outer radius, so a 3x3 neighbourhood always covers it) —
+ * a plain O(vertices x points) scan is too slow at heightfield resolution.
+ */
+const URBAN_INNER_R = 180
+const URBAN_OUTER_R = 650
+const URBAN_STRENGTH = 0.55
+const URBAN_COLOR = new Color('#8f8a76')
+const GRID_CELL = URBAN_OUTER_R
+
+function buildCorridorGrid(points: [number, number][]): Map<string, [number, number][]> {
+  const grid = new Map<string, [number, number][]>()
+  for (const p of points) {
+    const key = `${Math.floor(p[0] / GRID_CELL)},${Math.floor(p[1] / GRID_CELL)}`
+    const bucket = grid.get(key)
+    if (bucket) bucket.push(p)
+    else grid.set(key, [p])
+  }
+  return grid
+}
+
+function distanceToCorridor(grid: Map<string, [number, number][]>, x: number, z: number): number {
+  const cx = Math.floor(x / GRID_CELL)
+  const cz = Math.floor(z / GRID_CELL)
+  let best = Infinity
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const bucket = grid.get(`${cx + dx},${cz + dz}`)
+      if (!bucket) continue
+      for (const [px, pz] of bucket) {
+        const d = Math.hypot(px - x, pz - z)
+        if (d < best) best = d
+      }
+    }
+  }
+  return best
+}
+
 /** The draped terrain mesh plus the sea plane. */
-export function Terrain({ heightfield, projection }: { heightfield: Heightfield; projection: Projection }) {
+export function Terrain({
+  heightfield,
+  projection,
+  daylight,
+  corridor,
+}: {
+  heightfield: Heightfield
+  projection: Projection
+  daylight: Daylight
+  /** Scene-space corridor centerline, for the urban tint's distance falloff. */
+  corridor: [number, number][]
+}) {
+  const corridorGrid = useMemo(() => buildCorridorGrid(corridor), [corridor])
+
   const geometry = useMemo(() => {
     const { meta, sampleGeo } = heightfield
     const w = Math.floor((meta.width - 1) / STRIDE) + 1
@@ -50,6 +107,12 @@ export function Terrain({ heightfield, projection }: { heightfield: Heightfield;
         positions[i + 1] = elev * TERRAIN_EXAGGERATION
         positions[i + 2] = z
         const c = rampColor(elev)
+        // Below sea level there's no built-up land to tint.
+        if (elev >= 0.5) {
+          const d = distanceToCorridor(corridorGrid, x, z)
+          const urbanT = (1 - smooth(URBAN_INNER_R, URBAN_OUTER_R, d)) * URBAN_STRENGTH
+          if (urbanT > 0) c.lerp(URBAN_COLOR, urbanT)
+        }
         colors[i] = c.r
         colors[i + 1] = c.g
         colors[i + 2] = c.b
@@ -77,7 +140,7 @@ export function Terrain({ heightfield, projection }: { heightfield: Heightfield;
     geo.setIndex(new BufferAttribute(index, 1))
     geo.computeVertexNormals()
     return geo
-  }, [heightfield, projection])
+  }, [heightfield, projection, corridorGrid])
 
   const sea = useMemo(() => {
     const [wx, nz] = projection.toScene([heightfield.meta.west, heightfield.meta.north])
@@ -92,7 +155,7 @@ export function Terrain({ heightfield, projection }: { heightfield: Heightfield;
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[sea.cx, SEA_LEVEL_Y, sea.cz]}>
         <planeGeometry args={[sea.w, sea.h]} />
-        <meshStandardMaterial color="#1e6a89" roughness={0.35} />
+        <WaterMaterial color="#1e6a89" daylight={daylight} />
       </mesh>
     </group>
   )
