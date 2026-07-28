@@ -4,6 +4,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  DoubleSide,
   InstancedMesh,
   Matrix4,
   Quaternion,
@@ -23,9 +24,9 @@ const PLATFORM_W = 32
 const PLATFORM_H = 10
 const PLATFORM_COLOR = '#8f8a84'
 const BOARD_Y = 150
-/** Two platform instances (one each side of the tracks) pushed per station,
- * in station order — see platformMatrices below. */
-const PLATFORMS_PER_STATION = 2
+/** Sample points along a platform's length — enough to read as following the
+ * local track curve on a bend (e.g. Bandra, Dadar) without a visible facet. */
+const PLATFORM_STEPS = 6
 const BUILDINGS_PER_STATION = IS_COARSE_POINTER ? 8 : 24
 
 /** Deterministic PRNG so the city never reshuffles between loads. */
@@ -82,8 +83,59 @@ function ballastGeometry(network: NetworkData, track: TrainTrack, heightfield: H
   return geo
 }
 
+/**
+ * One platform, as a curved box following the local track curve — sampled
+ * via poseAt at even intervals along the platform's length, same idea as
+ * ballastGeometry's per-point sampling, so a platform on a bend (e.g.
+ * Bandra, Dadar) doesn't render as a straight box cutting across the curve.
+ */
+function platformGeometry(
+  track: TrainTrack,
+  heightfield: Heightfield,
+  station: StationPose,
+  side: 1 | -1,
+): BufferGeometry {
+  const centerOffset = ((station.tracks * TRACK_SPACING_SCENE_M) / 2 + PLATFORM_W / 2 + 6) * side
+  const innerOffset = centerOffset - side * (PLATFORM_W / 2)
+  const outerOffset = centerOffset + side * (PLATFORM_W / 2)
+  const positions: number[] = []
+  const indices: number[] = []
+  for (let k = 0; k <= PLATFORM_STEPS; k++) {
+    const along = -PLATFORM_L / 2 + (k * PLATFORM_L) / PLATFORM_STEPS
+    const pose = poseAt(track, station.chainageM, along)
+    const nx = -Math.cos(pose.angleRad)
+    const nz = Math.sin(pose.angleRad)
+    const ix = pose.x + nx * innerOffset
+    const iz = pose.z + nz * innerOffset
+    const ox = pose.x + nx * outerOffset
+    const oz = pose.z + nz * outerOffset
+    const iy = heightfield.railY(ix, iz)
+    const oy = heightfield.railY(ox, oz)
+    // 4 verts per step: innerTop, outerTop, innerBottom, outerBottom.
+    positions.push(
+      ix, iy + PLATFORM_H - 1, iz,
+      ox, oy + PLATFORM_H - 1, oz,
+      ix, iy - 1, iz,
+      ox, oy - 1, oz,
+    )
+    if (k > 0) {
+      const a = (k - 1) * 4
+      const b = k * 4
+      indices.push(a, a + 1, b, b, a + 1, b + 1) // top
+      indices.push(a + 1, a + 3, b + 1, b + 1, a + 3, b + 3) // outer wall
+      indices.push(a + 2, b + 2, a, a, b + 2, b) // inner wall
+    }
+  }
+  const geo = new BufferGeometry()
+  geo.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
+  geo.setIndex(indices)
+  geo.computeVertexNormals()
+  return geo
+}
+
 interface StationPose {
   id: string
+  chainageM: number
   x: number
   z: number
   y: number
@@ -128,6 +180,7 @@ export function StationDressing({
         const pose = poseAt(track, s.chainageM)
         return {
           id: s.id,
+          chainageM: s.chainageM,
           x: pose.x,
           z: pose.z,
           y: heightfield.railY(pose.x, pose.z),
@@ -140,29 +193,20 @@ export function StationDressing({
     [network, track, heightfield],
   )
 
-  // Two platforms per station, flanking the outermost tracks. Height is
-  // sampled at each platform's own offset position, not the station's
-  // centerline pose — same reasoning as the ballast bed above.
-  const platformMatrices = useMemo(() => {
-    const out: Matrix4[] = []
-    const q = new Quaternion()
-    const up = new Vector3(0, 1, 0)
-    for (const s of stations) {
-      const half = (s.tracks * TRACK_SPACING_SCENE_M) / 2 + PLATFORM_W / 2 + 6
-      const nx = -Math.cos(s.angleRad)
-      const nz = Math.sin(s.angleRad)
-      q.setFromAxisAngle(up, s.angleRad)
-      for (const side of [1, -1]) {
-        const px = s.x + nx * half * side
-        const pz = s.z + nz * half * side
-        const py = heightfield.railY(px, pz)
-        out.push(
-          new Matrix4().compose(new Vector3(px, py + PLATFORM_H / 2 - 1, pz), q, new Vector3(1, 1, 1)),
-        )
-      }
-    }
-    return out
-  }, [stations, heightfield])
+  // Two platforms per station, flanking the outermost tracks, each a small
+  // standalone mesh curved to the local track (see platformGeometry) —
+  // one shared instanced box can't follow a curve that differs per station.
+  const platforms = useMemo(
+    () =>
+      stations.flatMap((station) =>
+        ([1, -1] as const).map((side) => ({
+          key: `${station.id}-${side}`,
+          station,
+          geometry: platformGeometry(track, heightfield, station, side),
+        })),
+      ),
+    [stations, track, heightfield],
+  )
 
   // Sparse procedural blocks around each station, off the rail corridor.
   const buildingInstances = useMemo(() => {
@@ -204,20 +248,18 @@ export function StationDressing({
       <mesh geometry={ballast}>
         <meshStandardMaterial color={BALLAST_COLOR} roughness={1} />
       </mesh>
-      <instancedMesh
-        args={[undefined, undefined, platformMatrices.length]}
-        ref={applyMatrices(platformMatrices)}
-        frustumCulled={false}
-        onClick={(e) => {
-          e.stopPropagation()
-          if (e.instanceId === undefined) return
-          const station = stations[Math.floor(e.instanceId / PLATFORMS_PER_STATION)]
-          if (station) onSelectStation(station.id)
-        }}
-      >
-        <boxGeometry args={[PLATFORM_W, PLATFORM_H, PLATFORM_L]} />
-        <meshStandardMaterial color={PLATFORM_COLOR} roughness={0.9} />
-      </instancedMesh>
+      {platforms.map(({ key, station, geometry }) => (
+        <mesh
+          key={key}
+          geometry={geometry}
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelectStation(station.id)
+          }}
+        >
+          <meshStandardMaterial color={PLATFORM_COLOR} roughness={0.9} side={DoubleSide} />
+        </mesh>
+      ))}
       <instancedMesh
         args={[undefined, undefined, Math.max(1, buildingInstances.matrices.length)]}
         ref={applyMatrices(buildingInstances.matrices, buildingInstances.colors)}
