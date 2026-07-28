@@ -152,6 +152,7 @@ function stateOf(tt: Timetable, simTime: SimTime): TrainState | null {
         dwelling: simTime >= stop.arriveT,
         nextStopId: stop.id,
         speedMps: 0,
+        legDistanceM: 0,
       }
     }
     const isLast = i === stops.length - 1
@@ -164,6 +165,7 @@ function stateOf(tt: Timetable, simTime: SimTime): TrainState | null {
         dwelling: false,
         nextStopId: stops[i + 1].id,
         speedMps,
+        legDistanceM: distanceM,
       }
     }
   }

@@ -36,10 +36,31 @@ const RAKE_LEN = COACHES * (COACH_LENGTH_SCENE_M + COACH_GAP_SCENE_M) - COACH_GA
  * signal allows, not to the platform's midpoint. */
 const PLATFORM_NOSE_MARGIN_M = 15
 const PLATFORM_NOSE_OFFSET_M = PLATFORM_LENGTH_SCENE_M / 2 - PLATFORM_NOSE_MARGIN_M
-/** Below this speed the platform-alignment shift is blended fully in — well
- * under cruise (VMAX_MPS=15.5 in simulate.ts), so it only kicks in during the
- * final few metres of braking/accelerating, not the whole approach. */
-const PLATFORM_BLEND_SPEED_MPS = 2.5
+/**
+ * Distance (from the relevant stop, approaching or departing) over which the
+ * nose offset blends in/out. Keyed on DISTANCE rather than speed: a speed-based
+ * blend ties the offset's rate of change to the leg's particular deceleration
+ * shape, which is front-loaded near a full stop (speed craters long before
+ * distance does) — the offset then does most of its shifting in the last
+ * couple of seconds, reading as "hesitates, then darts to the platform edge"
+ * rather than a steady glide. Worse, on departure a speed-based unwind
+ * regresses outright: right after departure speed is still ~0, so it shrinks
+ * hundreds of scene-metres of offset over just a few metres of actual travel
+ * — a real backward slide, verified against the sim's own chainageM numbers.
+ *
+ * A distance-keyed smoothstep fixes both: it grows/shrinks in step with
+ * actual position, not with however fast a given leg happens to decelerate.
+ * The margin above PLATFORM_NOSE_OFFSET_M keeps the nose's net motion
+ * non-negative even at the steepest point of the smoothstep curve (its
+ * derivative peaks at 1.5x the linear rate at the midpoint) — 2x leaves the
+ * nose visibly still advancing there, not just barely non-decreasing.
+ */
+const PLATFORM_EDGE_BLEND_M = PLATFORM_NOSE_OFFSET_M * 2
+
+function edgeBlend(distanceM: number): number {
+  const t = Math.max(0, Math.min(1, distanceM / PLATFORM_EDGE_BLEND_M))
+  return 1 - t * t * (3 - 2 * t) // smoothstep, inverted: 1 at distance 0, 0 past the blend window
+}
 /**
  * Rake-overlap deconfliction for two trains folded onto the same drawn lane
  * (no signalling model keeps them apart in time — see laneFor above). Full
@@ -125,6 +146,10 @@ export function Fleet({
 
   const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
   const sections = network.sections
+  const stationChainageById = useMemo(
+    () => new Map(network.stations.map((s) => [s.id, s.chainageM])),
+    [network],
+  )
 
   const coachOffsets = useMemo(
     () =>
@@ -198,13 +223,16 @@ export function Fleet({
       // platform. Shift the whole rake forward so the nose pulls up near the
       // platform's far edge instead, same as a real driver would.
       //
-      // Blended continuously by speed rather than gated on the `dwelling`
-      // boolean: every leg profile eases speed to exactly 0 at arrival and
-      // back up from 0 at departure (see kinematics.ts), so speed is a
-      // continuous proxy for "how settled into the platform is this rake" —
-      // gating on the boolean instead would snap the whole rake forward the
-      // instant dwelling starts, and back the instant it ends.
-      const platformBlend = Math.max(0, Math.min(1, 1 - state.speedMps / PLATFORM_BLEND_SPEED_MPS))
+      // Blended continuously rather than gated on the `dwelling` boolean —
+      // gating would snap the whole rake forward the instant dwelling starts,
+      // and back the instant it ends. Two edgeBlend()s, taken by whichever
+      // shifts the rake further forward: distance-to-next-stop while
+      // approaching, distance-since-last-stop while departing (0 either way
+      // while actually dwelling, so both already agree there).
+      const nextStopChainageM = stationChainageById.get(state.nextStopId) ?? state.chainageM
+      const approachBlend = edgeBlend(Math.abs(nextStopChainageM - state.chainageM))
+      const departBlend = edgeBlend(state.legDistanceM)
+      const platformBlend = Math.max(approachBlend, departBlend)
       const refOffset = dirSign * PLATFORM_NOSE_OFFSET_M * platformBlend
       // Extra width/height exaggeration as the camera pulls away, so rakes
       // stay readable over the whole corridor but sit true at station level.

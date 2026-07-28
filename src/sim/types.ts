@@ -34,6 +34,14 @@ export interface TrainState {
   /** Station id of the next (or current, while dwelling) stop. */
   nextStopId: string
   speedMps: number
+  /**
+   * Metres covered since departing the previous stop (0 while dwelling or at
+   * the very start of a leg). Lets the render layer unwind a platform-nose
+   * offset by distance travelled rather than by speed — speed-based unwind
+   * regresses visibly, since a stopped train's speed rises from 0 far slower
+   * than any reasonable offset can shrink (see Fleet.tsx's platformBlend).
+   */
+  legDistanceM: number
 }
 
 /** A single scheduled run. The synthetic scheduler emits these (ticket #6). */

@@ -80,6 +80,23 @@ describe('one slow local Churchgate → Virar', () => {
     }
   })
 
+  it('resets legDistanceM to 0 at every dwell and grows it while running a leg', () => {
+    let prevStopId: string | null = null
+    let originChainageM = 0
+    for (const { state } of fullRun()) {
+      if (state.dwelling) {
+        expect(state.legDistanceM).toBe(0)
+        prevStopId = state.nextStopId
+        originChainageM = state.chainageM
+        continue
+      }
+      // Just left prevStopId's chainage — legDistanceM is how far past it.
+      if (prevStopId) {
+        expect(state.legDistanceM).toBeCloseTo(Math.abs(state.chainageM - originChainageM), 1)
+      }
+    }
+  })
+
   it('moves down-line monotonically and within speed limits', () => {
     let prev = -1
     for (const { state } of fullRun()) {
