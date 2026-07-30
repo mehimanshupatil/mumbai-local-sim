@@ -706,29 +706,39 @@ async function main() {
         `yard "${y.name}" is ${proj.distanceM.toFixed(0)} m from the corridor — likely a bad way id`,
       )
     }
-    const junction = pointAt(centerline, chain, proj.chainageM).p
-    const [jx, jy] = toXY(junction, junction[1])
-    const [cx, cy] = toXY(centroid, junction[1])
-    const dx = cx - jx
-    const dy = cy - jy
-    const len = Math.hypot(dx, dy) || 1
+    // Real car-shed sidings run parallel to the running lines, offset to
+    // whichever side the shed actually sits on — taken from the corridor's
+    // own local tangent/normal at the shed's chainage, not a straight line
+    // to the centroid (that reads as a spur cutting across the tracks at a
+    // steep angle; real yards don't look like that). The turnout that would
+    // actually connect the two is a separate, still-unbuilt visual (#18).
+    const nearPose = pointAt(centerline, chain, proj.chainageM)
+    const [jx, jy] = toXY(nearPose.p, nearPose.p[1])
+    const [cx, cy] = toXY(centroid, nearPose.p[1])
+    const normal: [number, number] = [-nearPose.tangent[1], nearPose.tangent[0]]
+    const lateralM = (cx - jx) * normal[0] + (cy - jy) * normal[1]
+    const alongM = (cx - jx) * nearPose.tangent[0] + (cy - jy) * nearPose.tangent[1]
+    const dirSign = alongM >= 0 ? 1 : -1
     // Bounding-box diagonal of the shed's own OSM footprint, clamped to a
     // plausible siding length — real sheds vary from a few hundred metres
     // (Kandivali) to well over a kilometre (Mumbai Central/Mahalaxmi).
     const lats = points.map((p) => p[1])
     const lons = points.map((p) => p[0])
-    const [w0, h0] = toXY([Math.min(...lons), Math.min(...lats)], junction[1])
-    const [w1, h1] = toXY([Math.max(...lons), Math.max(...lats)], junction[1])
+    const [w0, h0] = toXY([Math.min(...lons), Math.min(...lats)], nearPose.p[1])
+    const [w1, h1] = toXY([Math.max(...lons), Math.max(...lats)], nearPose.p[1])
     const footprintDiagM = Math.hypot(w1 - w0, h1 - h0)
     const sidingLengthM = Math.max(300, Math.min(2000, footprintDiagM))
-    const far = offsetLonLat(junction, (dx / len) * sidingLengthM, (dy / len) * sidingLengthM)
+    const nearOffset = offsetLonLat(nearPose.p, normal[0] * lateralM, normal[1] * lateralM)
+    const farPose = pointAt(centerline, chain, proj.chainageM + dirSign * sidingLengthM)
+    const farNormal: [number, number] = [-farPose.tangent[1], farPose.tangent[0]]
+    const farOffset = offsetLonLat(farPose.p, farNormal[0] * lateralM, farNormal[1] * lateralM)
     return {
       id: y.id,
       name: y.name,
       lat: Number(centroid[1].toFixed(6)),
       lon: Number(centroid[0].toFixed(6)),
       chainageM: Math.round(proj.chainageM),
-      siding: [junction, far].map(
+      siding: [nearOffset, farOffset].map(
         ([lon, lat]) => [Number(lon.toFixed(6)), Number(lat.toFixed(6))] as LonLat,
       ),
     }
