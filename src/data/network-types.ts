@@ -28,6 +28,23 @@ export interface TrackSection {
   tracks: number
 }
 
+/**
+ * A real EMU car shed / yard where terminated rakes stable, verified against
+ * OSM (not invented placements — see ticket #17).
+ */
+export interface YardRecord {
+  id: string
+  name: string
+  lat: number
+  lon: number
+  /** Nearest point on the corridor centerline, in metres from the origin
+   * terminus — where the siding branches off the running lines. */
+  chainageM: number
+  /** Siding centerline as [lon, lat] pairs, ordered from its corridor
+   * junction outward into the yard. */
+  siding: LonLat[]
+}
+
 export interface NetworkData {
   line: string
   name: string
@@ -39,6 +56,8 @@ export interface NetworkData {
   corridor: LonLat[]
   /** Ordered, contiguous, covering [0, lengthM]. */
   sections: TrackSection[]
+  /** Real car sheds/yards along the corridor, for parking terminated rakes. */
+  yards: YardRecord[]
   /** ISO date of the bake, for provenance only. */
   bakedAt: string
   source: string

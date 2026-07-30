@@ -13,6 +13,7 @@ import { SimClockDriver } from './sim-clock'
 import { StationDressing } from './StationDressing'
 import { buildTrainTrack } from './track-geometry'
 import { Terrain } from './Terrain'
+import { Yards } from './Yards'
 
 const FOV_DEG = 45
 
@@ -98,6 +99,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
             night={daylight.night}
             onSelectStation={(stationId) => onFocus({ mode: 'station', stationId })}
           />
+          <Yards network={network} projection={projection} heightfield={heightfield} />
           <SimClockDriver />
           <Fleet
             network={network}

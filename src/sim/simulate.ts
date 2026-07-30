@@ -6,6 +6,7 @@
  * from the motion profile plus dwell); trainStates() then answers any
  * simTime from it. Same inputs always give the same states.
  */
+import { haversineM } from '../data/geo'
 import type { NetworkData } from '../data/network-types'
 import type { SimTime } from './clock'
 import { easedLegProfile, legProfile, type LegProfile } from './kinematics'
@@ -21,6 +22,35 @@ const VMAX_MPS = 15.5 // ~56 km/h effective
 const ACCEL_MPS2 = 0.5
 const DECEL_MPS2 = 0.7
 export const DWELL_S = 30
+
+/**
+ * Terminated-rake parking at a real yard (ticket #17), instead of vanishing
+ * the instant a service ends. Bounded rather than for the rest of the sim
+ * day: real yards cycle through far more stock than they can hold at once
+ * (this line runs ~1,321 daily services through 4 yards), so an unbounded
+ * park would eventually try to render nearly every service that ever ran
+ * simultaneously. Capacity is resolved per yard in trainStates() — freshest
+ * arrival first, same "vanish" fate as before ticket #17 for anything past
+ * capacity, just delayed by up to PARK_DURATION_S.
+ */
+export const PARK_DURATION_S = 50 * 60
+export const YARD_CAPACITY = 4
+
+/** The real yard nearest a station, for routing a terminated service. */
+function nearestYardId(network: NetworkData, stationId: string): string | null {
+  const station = network.stations.find((s) => s.id === stationId)
+  if (!station || network.yards.length === 0) return null
+  let bestId: string | null = null
+  let bestD = Infinity
+  for (const y of network.yards) {
+    const d = haversineM([station.lon, station.lat], [y.lon, y.lat])
+    if (d < bestD) {
+      bestD = d
+      bestId = y.id
+    }
+  }
+  return bestId
+}
 
 interface TimetableStop {
   id: string
@@ -41,6 +71,12 @@ interface TrainIdentity {
   serviceType: ServiceType
   direction: Direction
   track: number
+  /** Real yard nearest this service's terminating station, for parking once
+   * the run ends (ticket #17); null if no yard is within a sane distance. */
+  homeYardId: string | null
+  /** Real yard nearest this service's originating station, for parking
+   * before departure (ticket #17) instead of teleporting onto the line. */
+  originYardId: string | null
 }
 
 export interface Timetable {
@@ -78,7 +114,15 @@ export function buildTimetable(network: NetworkData, def: ServiceDef): Timetable
       t = departT + leg.durationS
     }
   }
-  return { def, stops, legs, endT: stops[stops.length - 1].departT }
+  const identity: TrainIdentity = {
+    id: def.id,
+    serviceType: def.serviceType,
+    direction: def.direction,
+    track: def.track,
+    homeYardId: nearestYardId(network, def.stopIds[def.stopIds.length - 1]),
+    originYardId: nearestYardId(network, def.stopIds[0]),
+  }
+  return { def: identity, stops, legs, endT: stops[stops.length - 1].departT }
 }
 
 export interface RealStop {
@@ -97,7 +141,7 @@ export interface RealStop {
  */
 export function buildRealTimetable(
   network: NetworkData,
-  identity: TrainIdentity,
+  identity: Omit<TrainIdentity, 'homeYardId' | 'originYardId'>,
   realStops: RealStop[],
   dwellS = DWELL_S,
 ): Timetable {
@@ -118,29 +162,96 @@ export function buildRealTimetable(
     const durationS = Math.max(5, next.arriveT - stop.departT)
     return easedLegProfile(Math.abs(next.chainageM - stop.chainageM), durationS)
   })
-  return { def: identity, stops, legs, endT: stops[stops.length - 1].departT }
+  const def: TrainIdentity = {
+    ...identity,
+    homeYardId: nearestYardId(network, realStops[realStops.length - 1].stationId),
+    originYardId: nearestYardId(network, realStops[0].stationId),
+  }
+  return { def, stops, legs, endT: stops[stops.length - 1].departT }
 }
 
-/** All trains' states at simTime. Services outside their run window vanish. */
+/**
+ * All trains' states at simTime. Services outside their run window vanish —
+ * unless they end within reach of a real yard, in which case they park for
+ * up to PARK_DURATION_S (see stateOf), bounded per yard to YARD_CAPACITY
+ * concurrent rakes: this second pass resolves that capacity across every
+ * timetable at once (stateOf only sees its own), freshest arrival first.
+ */
 export function trainStates(timetables: Timetable[], simTime: SimTime): TrainState[] {
-  const out: TrainState[] = []
+  const raw: { state: TrainState; parkedAt: SimTime }[] = []
   for (const tt of timetables) {
     const state = stateOf(tt, simTime)
-    if (state) out.push(state)
+    if (!state) continue
+    // The moment this rake entered the yard: for a terminated run that's
+    // when it stopped running (tt.endT); for a not-yet-departed run it's
+    // the start of its bounded pre-departure window. Either way, higher =
+    // more recently parked.
+    const parkedAt = simTime < tt.stops[0].arriveT ? tt.stops[0].arriveT - PARK_DURATION_S : tt.endT
+    raw.push({ state, parkedAt })
+  }
+
+  const byYard = new Map<string, typeof raw>()
+  for (const r of raw) {
+    if (!r.state.parkedYardId) continue
+    const group = byYard.get(r.state.parkedYardId)
+    if (group) group.push(r)
+    else byYard.set(r.state.parkedYardId, [r])
+  }
+  const slotById = new Map<string, number>()
+  for (const group of byYard.values()) {
+    group.sort((a, b) => b.parkedAt - a.parkedAt) // most recently parked first
+    group.slice(0, YARD_CAPACITY).forEach((r, i) => slotById.set(r.state.id, i))
+  }
+
+  const out: TrainState[] = []
+  for (const { state } of raw) {
+    if (!state.parkedYardId) {
+      out.push(state)
+      continue
+    }
+    const slot = slotById.get(state.id)
+    if (slot === undefined) continue // past yard capacity — vanishes, as before #17
+    out.push({ ...state, parkedSlot: slot })
   }
   return out
 }
 
 function stateOf(tt: Timetable, simTime: SimTime): TrainState | null {
   const { def, stops, legs } = tt
-  if (simTime < stops[0].arriveT || simTime >= tt.endT) return null
-
   const sign = def.direction === 'down' ? 1 : -1
   const base = {
     id: def.id,
     serviceType: def.serviceType,
     direction: def.direction,
     track: def.track,
+  }
+  if (simTime < stops[0].arriveT) {
+    if (!def.originYardId || simTime < stops[0].arriveT - PARK_DURATION_S) return null
+    const first = stops[0]
+    return {
+      ...base,
+      chainageM: first.chainageM,
+      dwelling: true,
+      nextStopId: first.id,
+      speedMps: 0,
+      legDistanceM: 0,
+      parkedYardId: def.originYardId,
+      parkedSlot: null, // resolved across services by trainStates()
+    }
+  }
+  if (simTime >= tt.endT) {
+    if (!def.homeYardId || simTime >= tt.endT + PARK_DURATION_S) return null
+    const last = stops[stops.length - 1]
+    return {
+      ...base,
+      chainageM: last.chainageM,
+      dwelling: true,
+      nextStopId: last.id,
+      speedMps: 0,
+      legDistanceM: 0,
+      parkedYardId: def.homeYardId,
+      parkedSlot: null, // resolved across services by trainStates()
+    }
   }
   for (let i = 0; i < stops.length; i++) {
     const stop = stops[i]
@@ -153,6 +264,8 @@ function stateOf(tt: Timetable, simTime: SimTime): TrainState | null {
         nextStopId: stop.id,
         speedMps: 0,
         legDistanceM: 0,
+        parkedYardId: null,
+        parkedSlot: null,
       }
     }
     const isLast = i === stops.length - 1
@@ -166,6 +279,8 @@ function stateOf(tt: Timetable, simTime: SimTime): TrainState | null {
         nextStopId: stops[i + 1].id,
         speedMps,
         legDistanceM: distanceM,
+        parkedYardId: null,
+        parkedSlot: null,
       }
     }
   }

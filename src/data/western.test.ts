@@ -218,6 +218,49 @@ describe('track sections', () => {
   })
 })
 
+describe('yards', () => {
+  it('bakes the four real EMU car sheds confirmed on this corridor (#17)', () => {
+    expect(network.yards.map((y) => y.id).sort()).toEqual(
+      ['bhayandar', 'kandivali', 'mumbaicentral', 'virar'].sort(),
+    )
+  })
+
+  it('places every yard within the corridor chainage range', () => {
+    for (const y of network.yards) {
+      expect(y.chainageM, y.name).toBeGreaterThan(0)
+      expect(y.chainageM, y.name).toBeLessThan(network.lengthM)
+    }
+  })
+
+  it('sits every yard within the Mumbai corridor bounding box', () => {
+    for (const y of network.yards) {
+      expect(y.lat, y.name).toBeGreaterThan(18.9)
+      expect(y.lat, y.name).toBeLessThan(20.1)
+      expect(y.lon, y.name).toBeGreaterThan(72.6)
+      expect(y.lon, y.name).toBeLessThan(73.0)
+    }
+  })
+
+  it('gives every yard a junction point close to the corridor centerline', () => {
+    for (const y of network.yards) {
+      const junction = y.siding[0]
+      const nearest = network.corridor.reduce(
+        (best, p) => Math.min(best, haversineM(p, junction)),
+        Infinity,
+      )
+      expect(nearest, y.name).toBeLessThan(600)
+    }
+  })
+
+  it('gives every siding a real, non-degenerate length', () => {
+    for (const y of network.yards) {
+      expect(y.siding.length, y.name).toBeGreaterThanOrEqual(2)
+      const len = haversineM(y.siding[0], y.siding[y.siding.length - 1])
+      expect(len, y.name).toBeGreaterThan(100)
+    }
+  })
+})
+
 describe('provenance', () => {
   it('records line identity and bake metadata', () => {
     expect(network.line).toBe('western')

@@ -37,11 +37,14 @@ const LABEL_SCALE = 9
  * UV.v scaled by along-track distance so the texture tiles realistically
  * regardless of a track's total length.
  */
-function trackRibbonGeometry(points: [number, number, number][]): BufferGeometry {
+export function trackRibbonGeometry(
+  points: [number, number, number][],
+  widthScene: number = TRACK_WIDTH_SCENE_M,
+): BufferGeometry {
   const positions: number[] = []
   const uvs: number[] = []
   const indices: number[] = []
-  const half = TRACK_WIDTH_SCENE_M / 2
+  const half = widthScene / 2
   let dist = 0
   for (let i = 0; i < points.length; i++) {
     const [x, y, z] = points[i]
@@ -98,7 +101,7 @@ export function Corridor({
       )
     })
   }, [network, projection, heightfield])
-  const trackGeometries = useMemo(() => tracks.map(trackRibbonGeometry), [tracks])
+  const trackGeometries = useMemo(() => tracks.map((t) => trackRibbonGeometry(t)), [tracks])
   const trackTexture = useMemo(() => createTrackTexture(), [])
   return (
     <group>

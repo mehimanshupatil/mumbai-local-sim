@@ -18,10 +18,10 @@ import {
 } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
+import { COACHES, parkedSlotChainageM, RAKE_LEN } from './rake-geometry'
 import { simClock } from './sim-clock'
-import { buildTrainTrack, poseAt, sectionAtChainage } from './track-geometry'
+import { buildTrainTrack, buildYardTrack, poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
 
-const COACHES = 12
 const BODY_W = 18
 const BODY_H = 18
 /** Instance capacity — plenty above the ~70 concurrent rakes at peak. */
@@ -30,7 +30,6 @@ const MAX_RAKES = 128
 const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
 const NOSE_L = 14
-const RAKE_LEN = COACHES * (COACH_LENGTH_SCENE_M + COACH_GAP_SCENE_M) - COACH_GAP_SCENE_M
 /** How close a dwelling rake's nose pulls up to the platform's far edge (in
  * the direction of travel) — a real driver pulls up as far as the starter
  * signal allows, not to the platform's midpoint. */
@@ -145,6 +144,10 @@ export function Fleet({
   const rakeIds = useRef<string[]>([])
 
   const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
+  const yardTracks = useMemo(
+    () => new Map(network.yards.map((y) => [y.id, buildYardTrack(y, projection)] as const)),
+    [network, projection],
+  )
   const sections = network.sections
   const stationChainageById = useMemo(
     () => new Map(network.stations.map((s) => [s.id, s.chainageM])),
@@ -183,6 +186,7 @@ export function Fleet({
     // instead of one interpenetrating blob; it fades out once they clear.
     const laneGroups = new Map<string, typeof rakes>()
     for (const r of rakes) {
+      if (r.state.parkedYardId) continue // posed on its own yard siding, not a corridor lane
       if (r.section.tracks >= 6) continue // every semantic lane has its own track; never folded
       const key = `${r.section.fromM}-${r.lane}`
       const g = laneGroups.get(key)
@@ -213,30 +217,42 @@ export function Fleet({
     for (const { state, section, lane, nudge } of rakes) {
       if (n >= MAX_RAKES * COACHES) break
       const livery = LIVERY[state.serviceType]
-      const lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M + nudge
-      const dirSign = state.direction === 'down' ? 1 : -1
-      // TrainState.chainageM is the rake's leading edge while moving (correct
-      // for a real train's front relative to signals/platforms) — but while
-      // dwelling it equals the station's own chainage exactly, and platforms
-      // are centered on that same point. Left as the nose, the rake (~555
-      // scene-m) would hang ~245 scene-m off the back of a 620 scene-m
-      // platform. Shift the whole rake forward so the nose pulls up near the
-      // platform's far edge instead, same as a real driver would.
-      //
-      // Blended continuously rather than gated on the `dwelling` boolean —
-      // gating would snap the whole rake forward the instant dwelling starts,
-      // and back the instant it ends. Two edgeBlend()s, taken by whichever
-      // shifts the rake further forward: distance-to-next-stop while
-      // approaching, distance-since-last-stop while departing (0 either way
-      // while actually dwelling, so both already agree there).
-      const nextStopChainageM = stationChainageById.get(state.nextStopId) ?? state.chainageM
-      const approachBlend = edgeBlend(Math.abs(nextStopChainageM - state.chainageM))
-      const departBlend = edgeBlend(state.legDistanceM)
-      const platformBlend = Math.max(approachBlend, departBlend)
-      const refOffset = dirSign * PLATFORM_NOSE_OFFSET_M * platformBlend
+      // Parked rakes (ticket #17) pose on their own yard siding instead of
+      // the corridor: a fixed nose-to-tail slot, no platform/lane geometry.
+      const yardTrack = state.parkedYardId ? yardTracks.get(state.parkedYardId) : undefined
+      const track: TrainTrack = yardTrack ?? centerTrack
+      let lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M + nudge
+      let dirSign = state.direction === 'down' ? 1 : -1
+      let trackChainageM = state.chainageM
+      let refOffset = 0
+      if (yardTrack) {
+        lateral = 0
+        dirSign = 1 // nose points from the junction into the yard
+        trackChainageM = parkedSlotChainageM(state.parkedSlot)
+      } else {
+        // TrainState.chainageM is the rake's leading edge while moving (correct
+        // for a real train's front relative to signals/platforms) — but while
+        // dwelling it equals the station's own chainage exactly, and platforms
+        // are centered on that same point. Left as the nose, the rake (~555
+        // scene-m) would hang ~245 scene-m off the back of a 620 scene-m
+        // platform. Shift the whole rake forward so the nose pulls up near the
+        // platform's far edge instead, same as a real driver would.
+        //
+        // Blended continuously rather than gated on the `dwelling` boolean —
+        // gating would snap the whole rake forward the instant dwelling starts,
+        // and back the instant it ends. Two edgeBlend()s, taken by whichever
+        // shifts the rake further forward: distance-to-next-stop while
+        // approaching, distance-since-last-stop while departing (0 either way
+        // while actually dwelling, so both already agree there).
+        const nextStopChainageM = stationChainageById.get(state.nextStopId) ?? state.chainageM
+        const approachBlend = edgeBlend(Math.abs(nextStopChainageM - state.chainageM))
+        const departBlend = edgeBlend(state.legDistanceM)
+        const platformBlend = Math.max(approachBlend, departBlend)
+        refOffset = dirSign * PLATFORM_NOSE_OFFSET_M * platformBlend
+      }
       // Extra width/height exaggeration as the camera pulls away, so rakes
       // stay readable over the whole corridor but sit true at station level.
-      const nose = poseAt(centerTrack, state.chainageM, refOffset)
+      const nose = poseAt(track, trackChainageM, refOffset)
       const noseY = heightfield.railY(nose.x, nose.z)
       const camDist = Math.hypot(
         camera.position.x - nose.x,
@@ -245,7 +261,7 @@ export function Fleet({
       )
       const bulk = Math.min(BULK_MAX, Math.max(1, camDist / BULK_DISTANCE_M))
       for (let c = 0; c < COACHES; c++) {
-        const pose = poseAt(centerTrack, state.chainageM, refOffset - dirSign * coachOffsets[c])
+        const pose = poseAt(track, trackChainageM, refOffset - dirSign * coachOffsets[c])
         // Same normal convention as offsetPolyline: left of travel = (-dz, dx).
         const nx = -Math.cos(pose.angleRad)
         const nz = Math.sin(pose.angleRad)
@@ -262,7 +278,7 @@ export function Fleet({
         n++
       }
       // Headlight at the tip of the front nose so the cab doesn't occlude it.
-      const tip = poseAt(centerTrack, state.chainageM, refOffset + dirSign * NOSE_L * 0.9)
+      const tip = poseAt(track, trackChainageM, refOffset + dirSign * NOSE_L * 0.9)
       const tx = -Math.cos(tip.angleRad)
       const tz = Math.sin(tip.angleRad)
       dummy.position.set(
@@ -279,7 +295,7 @@ export function Fleet({
         [-NOSE_L / 2, 0], // ahead of the leading coach face
         [RAKE_LEN + NOSE_L / 2, Math.PI], // beyond the trailing face
       ] as const) {
-        const p = poseAt(centerTrack, state.chainageM, refOffset - dirSign * endOffset)
+        const p = poseAt(track, trackChainageM, refOffset - dirSign * endOffset)
         const ex = -Math.cos(p.angleRad)
         const ez = Math.sin(p.angleRad)
         const px = p.x + ex * lateral

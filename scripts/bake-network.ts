@@ -12,7 +12,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { haversineM, type LonLat } from '../src/data/geo'
-import type { NetworkData, StationRecord, TrackSection } from '../src/data/network-types'
+import type { NetworkData, StationRecord, TrackSection, YardRecord } from '../src/data/network-types'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const CACHE_DIR = join(ROOT, 'scripts', '.cache')
@@ -96,6 +96,30 @@ const EXPECTED_TRACKS: { from: string; to: string; min: number; max: number }[] 
   { from: 'Virar', to: 'Dahanu Road', min: 2, max: 2 },
 ]
 
+/**
+ * Real EMU car sheds along this line (ticket #17), OSM way ids pinned
+ * directly rather than name-matched at bake time — unlike STATIONS, car
+ * sheds don't share a consistent one-name-per-node shape (Kandivali's shed
+ * carries no name tag at all) so fuzzy matching isn't reliable here.
+ *
+ * Verified 2026-07-29 by an Overpass name search (`name~"[Cc]ar ?[Ss]hed|
+ * EMU|Yard"`) across the whole Mumbai OSM extract, keeping only matches
+ * within a few hundred metres of a Western line station. Real depots at
+ * Borivali/Andheri were assumed during scoping but did NOT turn up in OSM —
+ * these four are what the data actually confirms; don't add the assumed
+ * ones back in without their own verification.
+ */
+const YARD_WAYS: { id: string; name: string; wayIds: number[] }[] = [
+  { id: 'mumbaicentral', name: 'Mumbai Central EMU Carshed', wayIds: [988421635] },
+  { id: 'kandivali', name: 'Kandivali EMU Carshed', wayIds: [1170399168] },
+  {
+    id: 'bhayandar',
+    name: 'Bhayandar Car Shed',
+    wayIds: [1252845517, 1252845518, 1252845519, 1252845520],
+  },
+  { id: 'virar', name: 'Virar Carshed', wayIds: [257584187] },
+]
+
 interface OsmNode {
   type: 'node'
   id: number
@@ -160,6 +184,13 @@ function toXY(p: LonLat, refLat: number): [number, number] {
   const mPerDegLat = 111_320
   const mPerDegLon = 111_320 * Math.cos((refLat * Math.PI) / 180)
   return [p[0] * mPerDegLon, p[1] * mPerDegLat]
+}
+
+/** Inverse of toXY: offset a point by a metre delta near its own latitude. */
+function offsetLonLat(origin: LonLat, dxM: number, dyM: number): LonLat {
+  const mPerDegLat = 111_320
+  const mPerDegLon = 111_320 * Math.cos((origin[1] * Math.PI) / 180)
+  return [origin[0] + dxM / mPerDegLon, origin[1] + dyM / mPerDegLat]
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +470,10 @@ async function main() {
   )
   const excludeRels = await overpass('exclude-rels', `(${EXCLUDED_RELATION_QUERY});out;`)
   const wrRels = await overpass('wr-relation', `relation(${WR_RELATION_ID});out;`)
+  const yardWays = await overpass(
+    'yard-ways',
+    `(${YARD_WAYS.flatMap((y) => y.wayIds).map((id) => `way(${id});`).join('')});out geom tags;`,
+  )
 
   const ways = new Map<number, OsmWay>()
   for (const el of [...railSouth, ...railNorth]) {
@@ -650,6 +685,56 @@ async function main() {
     ([lon, lat]) => [Number(lon.toFixed(6)), Number(lat.toFixed(6))] as LonLat,
   )
 
+  // --- yards: centroid of each shed's OSM geometry, projected onto the
+  // rebased centerline for a junction point + direction into the yard ---
+  const yardWayById = new Map<number, OsmWay>()
+  for (const el of yardWays) if (el.type === 'way') yardWayById.set(el.id, el)
+  const yards: YardRecord[] = YARD_WAYS.map((y) => {
+    const points: LonLat[] = []
+    for (const wayId of y.wayIds) {
+      const way = yardWayById.get(wayId)
+      if (!way) throw new Error(`yard "${y.name}": OSM way ${wayId} not found — id may have changed`)
+      for (const g of way.geometry) points.push([g.lon, g.lat])
+    }
+    const centroid: LonLat = [
+      points.reduce((s, p) => s + p[0], 0) / points.length,
+      points.reduce((s, p) => s + p[1], 0) / points.length,
+    ]
+    const proj = projectChainage(centerline, chain, centroid)
+    if (proj.distanceM > 3000) {
+      throw new Error(
+        `yard "${y.name}" is ${proj.distanceM.toFixed(0)} m from the corridor — likely a bad way id`,
+      )
+    }
+    const junction = pointAt(centerline, chain, proj.chainageM).p
+    const [jx, jy] = toXY(junction, junction[1])
+    const [cx, cy] = toXY(centroid, junction[1])
+    const dx = cx - jx
+    const dy = cy - jy
+    const len = Math.hypot(dx, dy) || 1
+    // Bounding-box diagonal of the shed's own OSM footprint, clamped to a
+    // plausible siding length — real sheds vary from a few hundred metres
+    // (Kandivali) to well over a kilometre (Mumbai Central/Mahalaxmi).
+    const lats = points.map((p) => p[1])
+    const lons = points.map((p) => p[0])
+    const [w0, h0] = toXY([Math.min(...lons), Math.min(...lats)], junction[1])
+    const [w1, h1] = toXY([Math.max(...lons), Math.max(...lats)], junction[1])
+    const footprintDiagM = Math.hypot(w1 - w0, h1 - h0)
+    const sidingLengthM = Math.max(300, Math.min(2000, footprintDiagM))
+    const far = offsetLonLat(junction, (dx / len) * sidingLengthM, (dy / len) * sidingLengthM)
+    return {
+      id: y.id,
+      name: y.name,
+      lat: Number(centroid[1].toFixed(6)),
+      lon: Number(centroid[0].toFixed(6)),
+      chainageM: Math.round(proj.chainageM),
+      siding: [junction, far].map(
+        ([lon, lat]) => [Number(lon.toFixed(6)), Number(lat.toFixed(6))] as LonLat,
+      ),
+    }
+  })
+  console.log(`${yards.length} yards: ${yards.map((y) => `${y.name} @${y.chainageM}m`).join(', ')}`)
+
   const network: NetworkData = {
     line: 'western',
     name: 'Western Line',
@@ -657,6 +742,7 @@ async function main() {
     stations,
     corridor,
     sections,
+    yards,
     bakedAt: new Date().toISOString().slice(0, 10),
     source: 'OpenStreetMap via Overpass API (ODbL)',
   }

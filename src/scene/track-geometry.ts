@@ -3,7 +3,7 @@
  * section yields `tracks` parallel offset copies of the corridor centerline.
  * Pure geometry — no three.js or React.
  */
-import type { NetworkData, TrackSection } from '../data/network-types'
+import type { NetworkData, TrackSection, YardRecord } from '../data/network-types'
 import type { Projection } from './projection'
 
 export interface TrackPolyline {
@@ -16,7 +16,7 @@ export interface TrackPolyline {
 // the other.
 
 /** Cumulative planar length of a scene-space polyline, per vertex. */
-function cumulativeLength(points: [number, number][]): number[] {
+export function cumulativeLength(points: [number, number][]): number[] {
   const out = [0]
   for (let i = 1; i < points.length; i++) {
     out.push(out[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]))
@@ -96,6 +96,20 @@ export function buildTrainTrack(
   const points = offsetM === 0 ? centerline : offsetPolyline(centerline, offsetM)
   const lengths = cumulativeLength(points)
   return { points, lengths, scale: lengths[lengths.length - 1] / network.lengthM }
+}
+
+/**
+ * A yard siding as a posable track (ticket #17) — same TrainTrack shape as
+ * the corridor so poseAt works unmodified, but "chainage" here is just
+ * metres from the junction (siding[0]), not baked corridor chainage, so
+ * scale is 1. Only two points in the baked data (junction + far end), but
+ * poseAt already extrapolates past a track's ends along its tangent, so a
+ * rake parked further in than the drawn siding still renders in a straight
+ * line rather than breaking.
+ */
+export function buildYardTrack(yard: YardRecord, projection: Projection): TrainTrack {
+  const points = yard.siding.map(projection.toScene)
+  return { points, lengths: cumulativeLength(points), scale: 1 }
 }
 
 export interface TrackPose {

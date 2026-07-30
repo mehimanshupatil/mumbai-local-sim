@@ -42,6 +42,16 @@ export interface TrainState {
    * than any reasonable offset can shrink (see Fleet.tsx's platformBlend).
    */
   legDistanceM: number
+  /**
+   * Set once a service's run has ended and it's within its bounded parking
+   * window at a real yard (ticket #17); null while running, and null again
+   * once the window has passed (the rake is considered stabled out of view)
+   * or the yard was already at capacity when this service arrived.
+   */
+  parkedYardId: string | null
+  /** Which siding slot (0 = nearest the junction) this rake occupies while
+   * parked; null unless parkedYardId is set. */
+  parkedSlot: number | null
 }
 
 /** A single scheduled run. The synthetic scheduler emits these (ticket #6). */

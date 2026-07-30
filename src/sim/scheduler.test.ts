@@ -102,7 +102,10 @@ describe('synthetic scheduler', () => {
   it('never dwells an express: nonstop, always moving mid-run', () => {
     expect(expresses.length).toBeGreaterThan(0)
     const tt = timetableOf(expresses[0])
-    for (let t = expresses[0].departureTime; ; t += 30) {
+    // Bounded by the run's own endT, not by trainStates() going empty — a
+    // terminated service now parks at a yard for a while (ticket #17)
+    // rather than vanishing right at endT, and dwells there by definition.
+    for (let t = expresses[0].departureTime; t < tt.endT; t += 30) {
       const state = trainStates([tt], t)[0]
       if (!state) break
       expect(state.dwelling).toBe(false)

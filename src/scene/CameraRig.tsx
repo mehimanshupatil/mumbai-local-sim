@@ -6,8 +6,9 @@ import type { NetworkData } from '../data/network-types'
 import { trainStates, type Timetable } from '../sim/simulate'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
+import { parkedSlotChainageM } from './rake-geometry'
 import { simClock } from './sim-clock'
-import { poseAt, type TrainTrack } from './track-geometry'
+import { buildYardTrack, poseAt, type TrainTrack } from './track-geometry'
 
 /** Chase-cam geometry: behind and above the rake, whole train in frame. */
 const CHASE_BACK_M = 1100
@@ -51,6 +52,10 @@ export function CameraRig({
 }) {
   const landed = useRef(false)
   const lastFocusRef = useRef<Focus>(focus)
+  const yardTracks = useMemo(
+    () => new Map(network.yards.map((y) => [y.id, buildYardTrack(y, projection)] as const)),
+    [network, projection],
+  )
 
   // Only the followed service's timetable is simulated per frame.
   const followed = useMemo(
@@ -76,11 +81,17 @@ export function CameraRig({
         onFocus({ mode: 'free' }) // service ended — release the camera
         return
       }
-      const pose = poseAt(track, state.chainageM)
+      // A yard-parked rake (ticket #17) renders on its own siding, not the
+      // main corridor at its old chainage — chase it there instead, or the
+      // camera would settle on empty track while the train sits elsewhere.
+      const yardTrack = state.parkedYardId ? yardTracks.get(state.parkedYardId) : undefined
+      const chaseTrack = yardTrack ?? track
+      const chaseChainageM = yardTrack ? parkedSlotChainageM(state.parkedSlot) : state.chainageM
+      const pose = poseAt(chaseTrack, chaseChainageM)
       const y = heightfield.railY(pose.x, pose.z)
       // Chase from behind the direction of travel.
-      const dirSign = state.direction === 'down' ? 1 : -1
-      const back = poseAt(track, state.chainageM, -dirSign * CHASE_BACK_M)
+      const dirSign = yardTrack ? 1 : state.direction === 'down' ? 1 : -1
+      const back = poseAt(chaseTrack, chaseChainageM, -dirSign * CHASE_BACK_M)
       desired.set(back.x, y + CHASE_UP_M, back.z)
       lookTarget.set(pose.x, y + 60, pose.z)
       ctl.enabled = false
