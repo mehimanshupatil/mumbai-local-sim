@@ -189,10 +189,77 @@ export function terminusFanStub(
   return stubs
 }
 
+/** A track's lateral offset when a section fans `tracks`-many parallel copies of the centerline. */
+function centeredOffset(t: number, tracks: number, spacingM: number): number {
+  return (t - (tracks - 1) / 2) * spacingM
+}
+
+function smoothstep(x: number): number {
+  const t = Math.max(0, Math.min(1, x))
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * How a section boundary's tracks correspond to the next section's, by
+ * position relative to the centerline rather than raw index — matching by
+ * index would let e.g. a 4-track section's outermost track (index 3) land
+ * on a 6-track section's near-centre slot (also some index 3), which reads
+ * as one rail jumping clean across its neighbours. Grouped by side (an odd
+ * section's single centre track folds into the left group by convention,
+ * so parity changes shift by at most half a spacing, never crossing) and
+ * matched nearest-to-centre-first within a side: the tracks common to both
+ * sections carry through, any surplus is always the outermost one(s).
+ */
+function matchBoundary(
+  prevTracks: number,
+  nextTracks: number,
+): { matched: { prevIdx: number; nextIdx: number }[]; prevOnly: number[]; nextOnly: number[] } {
+  const rank = (t: number, n: number) => t - (n - 1) / 2
+  const group = (n: number): { left: number[]; right: number[] } => {
+    const left: number[] = []
+    const right: number[] = []
+    for (let t = 0; t < n; t++) (rank(t, n) <= 0 ? left : right).push(t)
+    const byAbsRank = (a: number, b: number) => Math.abs(rank(a, n)) - Math.abs(rank(b, n))
+    left.sort(byAbsRank)
+    right.sort(byAbsRank)
+    return { left, right }
+  }
+  const prevG = group(prevTracks)
+  const nextG = group(nextTracks)
+  const matched: { prevIdx: number; nextIdx: number }[] = []
+  const prevOnly: number[] = []
+  const nextOnly: number[] = []
+  for (const side of ['left', 'right'] as const) {
+    const p = prevG[side]
+    const q = nextG[side]
+    const n = Math.min(p.length, q.length)
+    for (let i = 0; i < n; i++) matched.push({ prevIdx: p[i], nextIdx: q[i] })
+    for (let i = n; i < p.length; i++) prevOnly.push(p[i])
+    for (let i = n; i < q.length; i++) nextOnly.push(q[i])
+  }
+  return { matched, prevOnly, nextOnly }
+}
+
+/** Half-length (each side of a boundary) of a turnout's diverging-curve throat. */
+const TURNOUT_HALF_WINDOW_M = 500
+/** Sample spacing inside a turnout window — dense enough to read as a curve
+ * rather than a handful of straight kinks, reusing the same fixed-cumulative-
+ * length sampling `pointAt` already does for platforms/ballast elsewhere. */
+const TURNOUT_SAMPLE_STEP_M = 20
+
 /**
  * One polyline per running track. Section chainages index the corridor by
  * its own planar length — scene length and baked chainage agree within the
  * projection's distortion (<0.1% over this corridor).
+ *
+ * At a section boundary where the track count changes, tracks don't just
+ * snap to the new lane offset (see matchBoundary above): a track carried
+ * through from the neighbouring section eases from its old offset to its
+ * new one over a symmetric window straddling the boundary, and a track that
+ * only exists on one side tapers to/from the centreline within that
+ * section's own half of the window — a diverging-curve turnout throat, at
+ * the same "curved geometry, no moving parts" tier as the textured ballast
+ * bed (#15) and the Churchgate terminus fan above (ticket #18).
  */
 export function buildTrackPolylines(
   network: NetworkData,
@@ -200,13 +267,76 @@ export function buildTrackPolylines(
   spacingM: number,
 ): TrackPolyline[] {
   const { points: centerline, lengths, scale } = buildTrainTrack(network, projection, 0)
+  const sections = network.sections
   const out: TrackPolyline[] = []
-  for (const section of network.sections) {
-    const base = slice(centerline, lengths, section.fromM * scale, section.toM * scale)
+  for (let s = 0; s < sections.length; s++) {
+    const section = sections[s]
+    const fromScene = section.fromM * scale
+    const toScene = section.toM * scale
+    const totalLen = toScene - fromScene
+    if (totalLen <= 0) continue
+    const half = Math.min(TURNOUT_HALF_WINDOW_M, totalLen / 2)
+    const prevSection = s > 0 ? sections[s - 1] : null
+    const nextSection = s < sections.length - 1 ? sections[s + 1] : null
+    const startMatch = prevSection ? matchBoundary(prevSection.tracks, section.tracks) : null
+    const endMatch = nextSection ? matchBoundary(section.tracks, nextSection.tracks) : null
+
+    // Base vertices: densely resampled inside each turnout window (so the
+    // eased offset actually renders as a curve, not a straight chord between
+    // whatever OSM vertices happen to fall nearby), native vertices between.
+    const base: [number, number][] = []
+    if (startMatch) {
+      for (let m = fromScene; m < fromScene + half; m += TURNOUT_SAMPLE_STEP_M) {
+        base.push(pointAt(centerline, lengths, m))
+      }
+    }
+    const midFrom = startMatch ? fromScene + half : fromScene
+    const midTo = endMatch ? toScene - half : toScene
+    if (midTo > midFrom) base.push(...slice(centerline, lengths, midFrom, midTo))
+    else base.push(pointAt(centerline, lengths, (midFrom + midTo) / 2))
+    if (endMatch) {
+      for (let m = toScene - half + TURNOUT_SAMPLE_STEP_M; m < toScene; m += TURNOUT_SAMPLE_STEP_M) {
+        base.push(pointAt(centerline, lengths, m))
+      }
+      base.push(pointAt(centerline, lengths, toScene))
+    }
     if (base.length < 2) continue
+    const baseLengths = cumulativeLength(base)
+    const baseTotal = baseLengths[baseLengths.length - 1]
+
     for (let t = 0; t < section.tracks; t++) {
-      const offset = (t - (section.tracks - 1) / 2) * spacingM
-      out.push({ points: offsetPolyline(base, offset) })
+      const staticOffset = centeredOffset(t, section.tracks, spacingM)
+      const startEntry = startMatch?.nextOnly.includes(t) ?? false
+      const startPair = startMatch?.matched.find((m) => m.nextIdx === t)
+      const endExit = endMatch?.prevOnly.includes(t) ?? false
+      const endPair = endMatch?.matched.find((m) => m.prevIdx === t)
+
+      const points = base.map((p, i) => {
+        const cumLen = baseLengths[i]
+        const dFromStart = cumLen
+        const dFromEnd = baseTotal - cumLen
+        let offset = staticOffset
+        if (startEntry && dFromStart < half) {
+          offset = smoothstep(dFromStart / half) * staticOffset
+        } else if (startPair && dFromStart < half) {
+          const prevOffset = centeredOffset(startPair.prevIdx, prevSection!.tracks, spacingM)
+          const u = (half + dFromStart) / (2 * half)
+          offset = prevOffset + smoothstep(u) * (staticOffset - prevOffset)
+        } else if (endExit && dFromEnd < half) {
+          offset = smoothstep(dFromEnd / half) * staticOffset
+        } else if (endPair && dFromEnd < half) {
+          const nextOffset = centeredOffset(endPair.nextIdx, nextSection!.tracks, spacingM)
+          const u = (half - dFromEnd) / (2 * half)
+          offset = staticOffset + smoothstep(u) * (nextOffset - staticOffset)
+        }
+        const prev = base[Math.max(0, i - 1)]
+        const next = base[Math.min(base.length - 1, i + 1)]
+        const dx = next[0] - prev[0]
+        const dy = next[1] - prev[1]
+        const len = Math.hypot(dx, dy) || 1
+        return [p[0] + (-dy / len) * offset, p[1] + (dx / len) * offset] as [number, number]
+      })
+      out.push({ points })
     }
   }
   return out
