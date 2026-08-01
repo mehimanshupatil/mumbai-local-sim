@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { MapControls, Sky, Stars } from '@react-three/drei'
 import { network, timetables, type Focus } from '../app-data'
+import { Bridges } from './Bridges'
 import { CameraRig, type ControlsLike } from './CameraRig'
 import { IS_COARSE_POINTER } from './config'
 import { Corridor } from './Corridor'
@@ -100,6 +101,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
             onSelectStation={(stationId) => onFocus({ mode: 'station', stationId })}
           />
           <Yards network={network} projection={projection} heightfield={heightfield} />
+          <Bridges network={network} projection={projection} heightfield={heightfield} />
           <SimClockDriver />
           <Fleet
             network={network}

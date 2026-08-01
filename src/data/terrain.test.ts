@@ -58,4 +58,11 @@ describe('baked terrain heightfield', () => {
     const creek = heightAt(72.83, midLat)
     expect(creek).toBeLessThanOrEqual(1)
   })
+
+  it('shows the Vaitarna creek as water between Virar and Vaitarna', () => {
+    // Real dip confirmed by direct sampling (2026-07-29) — the deepest
+    // channel sits ~500m off the rail alignment itself, so this isn't right
+    // on the corridor's own path (see Bridges.tsx's CROSSINGS comment).
+    expect(heightAt(72.824, 19.495)).toBeLessThanOrEqual(0)
+  })
 })
