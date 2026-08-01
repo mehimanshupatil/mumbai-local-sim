@@ -25,7 +25,7 @@ import { buildTrainTrack, poseAt, sectionAtChainage } from './track-geometry'
  * spanning boom) so a single shape works for every section regardless of
  * track count.
  */
-const OHE_SPACING_M = 300
+const OHE_SPACING_M = 400
 const OHE_MAST_HEIGHT = 45
 const OHE_MAST_RADIUS = 2.5
 const OHE_BOOM_Y = 42
