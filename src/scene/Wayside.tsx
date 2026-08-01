@@ -13,10 +13,19 @@ import { buildTrainTrack, poseAt, sectionAtChainage } from './track-geometry'
  * occupancy model in src/sim/, out of scope here) and no sim state read.
  */
 
-/** Real WR OHE mast spacing is ~60-80m; masts run in portal-gantry pairs
- * (one either side of the tracks + a spanning boom) so a single shape works
- * for every section regardless of track count. */
-const OHE_SPACING_M = 70
+/**
+ * Real WR OHE mast spacing is ~60-80m — but chainage here is true-scale
+ * while the train isn't (COACH_LENGTH_SCENE_M exaggerates coach length 2x,
+ * same reasoning as that constant's own comment: a 120km corridor needs
+ * exaggerated foreground detail to read at all). Left at true scale, a rake
+ * would pass ~8 gantries along its own oversized length versus ~3.7 in
+ * reality — poles read as packed tight next to an oversized train. Scaling
+ * spacing by the same 2x keeps it proportional to the train instead.
+ * Masts run in portal-gantry pairs (one either side of the tracks + a
+ * spanning boom) so a single shape works for every section regardless of
+ * track count.
+ */
+const OHE_SPACING_M = 300
 const OHE_MAST_HEIGHT = 45
 const OHE_MAST_RADIUS = 2.5
 const OHE_BOOM_Y = 42
