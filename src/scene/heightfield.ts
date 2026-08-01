@@ -25,8 +25,17 @@ export interface Heightfield {
   railY: (x: number, z: number) => number
 }
 
-/** Rails ride an embankment; creek/bay crossings become low bridges. */
-const EMBANKMENT_M = 2
+/**
+ * Rails ride an embankment; creek/bay crossings become low bridges. Sized
+ * with headroom against Terrain.tsx's STRIDE=2 decimation, not just the
+ * real embankment height: the drawn terrain mesh only samples every other
+ * heightfield cell, so between two decimated vertices it can render several
+ * real metres higher than this exact point's true elevation (worst measured
+ * case on this corridor: ~3.2m, near Vaitarna/Saphale) — too little buffer
+ * here and the track visibly sinks into the terrain at scattered points,
+ * not just at the three real water crossings.
+ */
+const EMBANKMENT_M = 6
 
 export async function loadHeightfield(projection: Projection): Promise<Heightfield> {
   const base = import.meta.env.BASE_URL
