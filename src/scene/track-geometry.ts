@@ -199,6 +199,28 @@ function smoothstep(x: number): number {
   return t * t * (3 - 2 * t)
 }
 
+interface BoundaryMatch {
+  matched: { prevIdx: number; nextIdx: number }[]
+  prevOnly: number[]
+  nextOnly: number[]
+  /**
+   * For each prevOnly track, the offset (in the prev section's own spacing)
+   * it should taper *toward* at the boundary — the nearest surviving
+   * (matched) neighbour further in, not the raw centreline. Tapering a
+   * surplus track all the way to 0 walks its path straight through any
+   * matched track sitting at a nonzero offset in between: a real
+   * self-crossing of two track polylines, rendered as a pinched, jagged gap
+   * torn into the ballast ribbon (seen in-browser at Virar's 4→2 boundary —
+   * the outermost pair tapered clean through the two tracks continuing past
+   * it). Converging on the nearest surviving neighbour instead keeps every
+   * track's ordering intact through the whole transition. Falls back to 0
+   * only when nothing survives on that side to converge toward.
+   */
+  prevConverge: Map<number, number>
+  /** Same idea for nextOnly tracks, in the next section's own spacing. */
+  nextConverge: Map<number, number>
+}
+
 /**
  * How a section boundary's tracks correspond to the next section's, by
  * position relative to the centerline rather than raw index — matching by
@@ -210,10 +232,7 @@ function smoothstep(x: number): number {
  * matched nearest-to-centre-first within a side: the tracks common to both
  * sections carry through, any surplus is always the outermost one(s).
  */
-function matchBoundary(
-  prevTracks: number,
-  nextTracks: number,
-): { matched: { prevIdx: number; nextIdx: number }[]; prevOnly: number[]; nextOnly: number[] } {
+function matchBoundary(prevTracks: number, nextTracks: number, spacingM: number): BoundaryMatch {
   const rank = (t: number, n: number) => t - (n - 1) / 2
   const group = (n: number): { left: number[]; right: number[] } => {
     const left: number[] = []
@@ -229,15 +248,34 @@ function matchBoundary(
   const matched: { prevIdx: number; nextIdx: number }[] = []
   const prevOnly: number[] = []
   const nextOnly: number[] = []
+  const prevConverge = new Map<number, number>()
+  const nextConverge = new Map<number, number>()
   for (const side of ['left', 'right'] as const) {
     const p = prevG[side]
     const q = nextG[side]
     const n = Math.min(p.length, q.length)
     for (let i = 0; i < n; i++) matched.push({ prevIdx: p[i], nextIdx: q[i] })
-    for (let i = n; i < p.length; i++) prevOnly.push(p[i])
-    for (let i = n; i < q.length; i++) nextOnly.push(q[i])
+    // p/q are sorted nearest-to-centre-first, so walking in order and
+    // remembering the last matched (surviving) track's own offset gives
+    // exactly the nearest inward neighbour for every surplus track after it.
+    let prevInward = 0
+    for (let i = 0; i < p.length; i++) {
+      if (i < n) prevInward = centeredOffset(p[i], prevTracks, spacingM)
+      else {
+        prevOnly.push(p[i])
+        prevConverge.set(p[i], prevInward)
+      }
+    }
+    let nextInward = 0
+    for (let i = 0; i < q.length; i++) {
+      if (i < n) nextInward = centeredOffset(q[i], nextTracks, spacingM)
+      else {
+        nextOnly.push(q[i])
+        nextConverge.set(q[i], nextInward)
+      }
+    }
   }
-  return { matched, prevOnly, nextOnly }
+  return { matched, prevOnly, nextOnly, prevConverge, nextConverge }
 }
 
 /** Half-length (each side of a boundary) of a turnout's diverging-curve throat. */
@@ -278,8 +316,8 @@ export function buildTrackPolylines(
     const half = Math.min(TURNOUT_HALF_WINDOW_M, totalLen / 2)
     const prevSection = s > 0 ? sections[s - 1] : null
     const nextSection = s < sections.length - 1 ? sections[s + 1] : null
-    const startMatch = prevSection ? matchBoundary(prevSection.tracks, section.tracks) : null
-    const endMatch = nextSection ? matchBoundary(section.tracks, nextSection.tracks) : null
+    const startMatch = prevSection ? matchBoundary(prevSection.tracks, section.tracks, spacingM) : null
+    const endMatch = nextSection ? matchBoundary(section.tracks, nextSection.tracks, spacingM) : null
 
     // Base vertices: densely resampled inside each turnout window (so the
     // eased offset actually renders as a curve, not a straight chord between
@@ -317,13 +355,15 @@ export function buildTrackPolylines(
         const dFromEnd = baseTotal - cumLen
         let offset = staticOffset
         if (startEntry && dFromStart < half) {
-          offset = smoothstep(dFromStart / half) * staticOffset
+          const convergeOffset = startMatch!.nextConverge.get(t) ?? 0
+          offset = convergeOffset + smoothstep(dFromStart / half) * (staticOffset - convergeOffset)
         } else if (startPair && dFromStart < half) {
           const prevOffset = centeredOffset(startPair.prevIdx, prevSection!.tracks, spacingM)
           const u = (half + dFromStart) / (2 * half)
           offset = prevOffset + smoothstep(u) * (staticOffset - prevOffset)
         } else if (endExit && dFromEnd < half) {
-          offset = smoothstep(dFromEnd / half) * staticOffset
+          const convergeOffset = endMatch!.prevConverge.get(t) ?? 0
+          offset = convergeOffset + smoothstep(dFromEnd / half) * (staticOffset - convergeOffset)
         } else if (endPair && dFromEnd < half) {
           const nextOffset = centeredOffset(endPair.nextIdx, nextSection!.tracks, spacingM)
           const u = (half - dFromEnd) / (2 * half)
