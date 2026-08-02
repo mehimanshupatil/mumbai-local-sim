@@ -204,20 +204,24 @@ interface BoundaryMatch {
   prevOnly: number[]
   nextOnly: number[]
   /**
-   * For each prevOnly track, the offset (in the prev section's own spacing)
-   * it should taper *toward* at the boundary — the nearest surviving
-   * (matched) neighbour further in, not the raw centreline. Tapering a
-   * surplus track all the way to 0 walks its path straight through any
-   * matched track sitting at a nonzero offset in between: a real
-   * self-crossing of two track polylines, rendered as a pinched, jagged gap
-   * torn into the ballast ribbon (seen in-browser at Virar's 4→2 boundary —
-   * the outermost pair tapered clean through the two tracks continuing past
-   * it). Converging on the nearest surviving neighbour instead keeps every
-   * track's ordering intact through the whole transition. Falls back to 0
-   * only when nothing survives on that side to converge toward.
+   * For each prevOnly track, the offset it should taper *toward* at the
+   * boundary — not the raw centreline (that walks a surplus track straight
+   * through any matched track sitting at a nonzero offset in between: a
+   * real self-crossing of two track polylines, rendered as a pinched,
+   * jagged gap torn into the ballast — seen in-browser at Virar's 4→2), and
+   * not the nearest surviving neighbour's own *static* offset either (that
+   * still crosses whenever the neighbour itself is easing across the same
+   * boundary and its own value there differs from its static offset — seen
+   * in-browser at Mahim Junction's 5→4 after the first fix, a smaller but
+   * real residual crossing). It has to be the neighbour's actual position
+   * *at this exact boundary point*: for a matched pair the two sides'
+   * blend formulas are provably equal there and land exactly halfway
+   * between the pair's two static offsets (see buildTrackPolylines), so
+   * that midpoint is what every surplus track outward of it converges to.
    */
   prevConverge: Map<number, number>
-  /** Same idea for nextOnly tracks, in the next section's own spacing. */
+  /** Same idea for nextOnly tracks — same shared boundary value, since it's
+   * the same physical point on the same matched pair. */
   nextConverge: Map<number, number>
 }
 
@@ -254,25 +258,25 @@ function matchBoundary(prevTracks: number, nextTracks: number, spacingM: number)
     const p = prevG[side]
     const q = nextG[side]
     const n = Math.min(p.length, q.length)
-    for (let i = 0; i < n; i++) matched.push({ prevIdx: p[i], nextIdx: q[i] })
-    // p/q are sorted nearest-to-centre-first, so walking in order and
-    // remembering the last matched (surviving) track's own offset gives
-    // exactly the nearest inward neighbour for every surplus track after it.
-    let prevInward = 0
-    for (let i = 0; i < p.length; i++) {
-      if (i < n) prevInward = centeredOffset(p[i], prevTracks, spacingM)
-      else {
-        prevOnly.push(p[i])
-        prevConverge.set(p[i], prevInward)
-      }
+    // p/q are sorted nearest-to-centre-first, so at most one of the two
+    // surplus loops below ever runs. Walking the matched pairs in order and
+    // remembering the last one's shared boundary value gives exactly the
+    // nearest surviving neighbour's actual position at this boundary for
+    // every surplus track after it (see prevConverge's doc comment for why
+    // it has to be that value, not either track's own static offset).
+    let boundaryInward = 0
+    for (let i = 0; i < n; i++) {
+      matched.push({ prevIdx: p[i], nextIdx: q[i] })
+      boundaryInward =
+        (centeredOffset(p[i], prevTracks, spacingM) + centeredOffset(q[i], nextTracks, spacingM)) / 2
     }
-    let nextInward = 0
-    for (let i = 0; i < q.length; i++) {
-      if (i < n) nextInward = centeredOffset(q[i], nextTracks, spacingM)
-      else {
-        nextOnly.push(q[i])
-        nextConverge.set(q[i], nextInward)
-      }
+    for (let i = n; i < p.length; i++) {
+      prevOnly.push(p[i])
+      prevConverge.set(p[i], boundaryInward)
+    }
+    for (let i = n; i < q.length; i++) {
+      nextOnly.push(q[i])
+      nextConverge.set(q[i], boundaryInward)
     }
   }
   return { matched, prevOnly, nextOnly, prevConverge, nextConverge }
