@@ -1,7 +1,7 @@
-import { CanvasTexture, RepeatWrapping } from 'three'
+import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three'
 
-const CANVAS_W = 64
-const CANVAS_H = 256
+const CANVAS_W = 128
+const CANVAS_H = 512
 /** Sleepers per texture tile — the tile then repeats via UV wrapping. */
 const SLEEPERS_PER_TILE = 4
 
@@ -9,8 +9,15 @@ const SLEEPERS_PER_TILE = 4
  * Procedural ballast+sleeper+rail texture for a single running track,
  * tiled along its length via UV wrapping. No binary asset to source or
  * commit — generated once at load time and reused by every track ribbon.
+ *
+ * `maxAnisotropy` comes from the renderer (`gl.capabilities.getMaxAnisotropy()`).
+ * It matters more than anything else here: the corridor is almost always
+ * viewed at a grazing angle, which is texture *minification*, and MSAA does
+ * nothing for that. At the default anisotropy of 1 the sleeper bands collapse
+ * into moire chevrons and the rails break into a dotted smear within a few
+ * hundred metres of the camera.
  */
-export function createTrackTexture(): CanvasTexture {
+export function createTrackTexture(maxAnisotropy = 1): CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = CANVAS_W
   canvas.height = CANVAS_H
@@ -26,7 +33,9 @@ export function createTrackTexture(): CanvasTexture {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff
     return seed / 0x7fffffff
   }
-  for (let i = 0; i < 500; i++) {
+  // Speckle count tracks canvas area so grain density survives a resolution change.
+  const speckles = Math.round((CANVAS_W * CANVAS_H) / 32)
+  for (let i = 0; i < speckles; i++) {
     const shade = 70 + rand() * 60
     ctx.fillStyle = `rgb(${shade}, ${shade * 0.94}, ${shade * 0.86})`
     ctx.fillRect(rand() * CANVAS_W, rand() * CANVAS_H, 2, 2)
@@ -49,6 +58,10 @@ export function createTrackTexture(): CanvasTexture {
   const texture = new CanvasTexture(canvas)
   texture.wrapS = RepeatWrapping
   texture.wrapT = RepeatWrapping
+  // A colour map authored in sRGB; without this three treats it as linear and
+  // the ballast renders washed out against the terrain.
+  texture.colorSpace = SRGBColorSpace
+  texture.anisotropy = maxAnisotropy
   texture.needsUpdate = true
   return texture
 }
