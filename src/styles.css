@@ -79,15 +79,28 @@ body {
   border-radius: 6px;
   padding: 3px 9px;
   cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
 }
 
 .speed-btn:hover {
   background: rgba(255, 255, 255, 0.22);
 }
 
+.speed-btn:active {
+  transform: translateY(1px);
+}
+
 .speed-btn.active {
   background: #7b1fa2;
   border-color: #7b1fa2;
+}
+
+:focus-visible {
+  outline: 2px solid #c98ae0;
+  outline-offset: 2px;
 }
 
 .station-card {
@@ -101,6 +114,15 @@ body {
   border-radius: 10px;
   padding: 14px 16px;
   backdrop-filter: blur(6px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  animation: card-in 180ms ease-out;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
 }
 
 .station-card header {
@@ -145,8 +167,26 @@ body {
   padding: 2px 4px;
 }
 
+.card-close {
+  transition: color 140ms ease;
+}
+
 .card-close:hover {
   color: #fff;
+}
+
+.follow-hint {
+  animation: card-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .arrivals-direction {
