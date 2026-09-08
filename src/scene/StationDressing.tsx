@@ -1,10 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { Billboard } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
 import {
   BufferAttribute,
   BufferGeometry,
   Color,
   DoubleSide,
+  type Group,
   InstancedMesh,
   Matrix4,
   Quaternion,
@@ -24,6 +26,15 @@ const PLATFORM_W = 32
 const PLATFORM_H = 10
 const PLATFORM_COLOR = '#8f8a84'
 const BOARD_Y = 150
+/**
+ * These boards are the close-up representation: Corridor's floating labels
+ * fade *in* over the same band (dist 4000 -> 12000) and take over from here.
+ * Without the matching fade *out*, all 37 stayed drawn at every distance and
+ * collapsed into overlapping specks near the horizon — the handover was only
+ * ever half-implemented, and Corridor's declutter can't see these.
+ */
+const BOARD_FADE_NEAR = 4000
+const BOARD_FADE_FAR = 12000
 /** Sample points along a platform's length — enough to read as following the
  * local track curve on a bend (e.g. Bandra, Dadar) without a visible facet. */
 const PLATFORM_STEPS = 6
@@ -160,11 +171,14 @@ export function StationDressing({
   network,
   projection,
   heightfield,
+  night,
   onSelectStation,
 }: {
   network: NetworkData
   projection: Projection
   heightfield: Heightfield
+  /** 0 = full day, 1 = full night; dims the unlit station boards. */
+  night: number
   onSelectStation: (stationId: string) => void
 }) {
   const track = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
@@ -207,6 +221,23 @@ export function StationDressing({
       ),
     [stations, track, heightfield],
   )
+
+  // Hand the boards over to Corridor's floating labels as the camera pulls
+  // back (see BOARD_FADE_NEAR/FAR).
+  const boardRefs = useRef<(Group | null)[]>([])
+  const boardPoints = useMemo(
+    () => stations.map((s) => new Vector3(s.x, s.y + BOARD_Y, s.z)),
+    [stations],
+  )
+  useFrame(({ camera }) => {
+    for (let i = 0; i < boardPoints.length; i++) {
+      const board = boardRefs.current[i]
+      if (!board) continue
+      const dist = camera.position.distanceTo(boardPoints[i])
+      const t = (BOARD_FADE_FAR - dist) / (BOARD_FADE_FAR - BOARD_FADE_NEAR)
+      board.scale.setScalar(Math.min(1, Math.max(0, t)))
+    }
+  })
 
   // Sparse procedural blocks around each station, off the rail corridor.
   const buildingInstances = useMemo(() => {
@@ -268,16 +299,19 @@ export function StationDressing({
         <boxGeometry args={[1, 1, 1]} />
         <meshStandardMaterial roughness={0.95} />
       </instancedMesh>
-      {stations.map((s) => (
+      {stations.map((s, i) => (
         <Billboard
           key={s.id}
+          ref={(g: Group | null) => {
+            boardRefs.current[i] = g
+          }}
           position={[s.x, s.y + BOARD_Y, s.z]}
           onClick={(e) => {
             e.stopPropagation()
             onSelectStation(s.id)
           }}
         >
-          <WRBoard name={s.name} nameMr={s.nameMr} />
+          <WRBoard name={s.name} nameMr={s.nameMr} night={night} />
         </Billboard>
       ))}
     </group>

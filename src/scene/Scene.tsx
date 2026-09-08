@@ -92,6 +92,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
             network={network}
             projection={projection}
             heightfield={heightfield}
+            night={daylight.night}
             onSelectStation={(stationId) => onFocus({ mode: 'station', stationId })}
           />
           <Corridor
