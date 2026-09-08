@@ -10,6 +10,24 @@ import { WaterMaterial } from './WaterMaterial'
 /** Grid decimation: 1 = full heightfield resolution. */
 const STRIDE = 2
 
+/**
+ * Clearance above the sea plane for any vertex the ramp still colours as land.
+ *
+ * Terrain Y is `elev * TERRAIN_EXAGGERATION`, so with the sea plane at
+ * SEA_LEVEL_Y everything below `SEA_LEVEL_Y / TERRAIN_EXAGGERATION` real
+ * metres sinks under it. The Vasai/Naigaon salt flats sit right in that band,
+ * so decimated cells there punched hundreds of hard-edged blue holes through
+ * tan mudflat — geometry saying "sea" while the colour ramp said "land".
+ *
+ * Elevation alone cannot fix this. Heights are Int16 whole metres, so the
+ * open Arabian Sea and a Vasai salt flat are both stored as exactly 0, while
+ * the colour ramp paints 0 as sand. Any threshold that floats the flats also
+ * floats the ocean and lands Mumbai. Connectivity is the discriminator:
+ * water reachable from the map border is sea, an isolated 0 m patch inland
+ * is a flat, and only the latter is lifted clear of the plane.
+ */
+const SHORE_CLEARANCE_Y = 0.06
+
 /** Elevation color ramp (real metres → land cover), mumbai-lakes style. */
 const RAMP: [number, string][] = [
   [-50, '#284c56'], // seabed
@@ -96,6 +114,7 @@ export function Terrain({
     const h = Math.floor((meta.height - 1) / STRIDE) + 1
     const positions = new Float32Array(w * h * 3)
     const colors = new Float32Array(w * h * 3)
+    const elevs = new Float32Array(w * h)
     for (let gy = 0; gy < h; gy++) {
       for (let gx = 0; gx < w; gx++) {
         const lon = meta.west + ((gx * STRIDE) / (meta.width - 1)) * (meta.east - meta.west)
@@ -103,8 +122,8 @@ export function Terrain({
         const elev = sampleGeo(lon, lat)
         const [x, z] = projection.toScene([lon, lat])
         const i = (gy * w + gx) * 3
+        elevs[gy * w + gx] = elev
         positions[i] = x
-        positions[i + 1] = elev * TERRAIN_EXAGGERATION
         positions[i + 2] = z
         const c = rampColor(elev)
         // Below sea level there's no built-up land to tint.
@@ -118,6 +137,41 @@ export function Terrain({
         colors[i + 2] = c.b
       }
     }
+
+    // Flood-fill the real sea inward from the map border, then float every
+    // at-or-below-sea-level cell the fill never reached (see SHORE_CLEARANCE_Y).
+    const isSea = new Uint8Array(w * h)
+    const queue = new Int32Array(w * h)
+    let head = 0
+    let tail = 0
+    const flood = (idx: number) => {
+      if (isSea[idx] || elevs[idx] > 0) return
+      isSea[idx] = 1
+      queue[tail++] = idx
+    }
+    for (let gx = 0; gx < w; gx++) {
+      flood(gx)
+      flood((h - 1) * w + gx)
+    }
+    for (let gy = 0; gy < h; gy++) {
+      flood(gy * w)
+      flood(gy * w + w - 1)
+    }
+    while (head < tail) {
+      const idx = queue[head++]
+      const gx = idx % w
+      const gy = (idx / w) | 0
+      if (gx > 0) flood(idx - 1)
+      if (gx < w - 1) flood(idx + 1)
+      if (gy > 0) flood(idx - w)
+      if (gy < h - 1) flood(idx + w)
+    }
+    const floor = SEA_LEVEL_Y + SHORE_CLEARANCE_Y
+    for (let idx = 0; idx < w * h; idx++) {
+      const y = elevs[idx] * TERRAIN_EXAGGERATION
+      positions[idx * 3 + 1] = isSea[idx] ? y : Math.max(y, floor)
+    }
+
     const index = new Uint32Array((w - 1) * (h - 1) * 6)
     let k = 0
     for (let gy = 0; gy < h - 1; gy++) {
@@ -145,13 +199,24 @@ export function Terrain({
   const sea = useMemo(() => {
     const [wx, nz] = projection.toScene([heightfield.meta.west, heightfield.meta.north])
     const [ex, sz] = projection.toScene([heightfield.meta.east, heightfield.meta.south])
-    return { cx: (wx + ex) / 2, cz: (nz + sz) / 2, w: (ex - wx) * 6, h: (sz - nz) * 6 }
+    const w = Math.abs(ex - wx) * 6
+    const h = Math.abs(sz - nz) * 6
+    // The plane runs 6x the terrain so the ocean reaches the horizon west of
+    // the coast — but centring it that wide also pushed sea out past the
+    // terrain's eastern edge, painting a blue band on the skyline *behind*
+    // the Sahyadris, where there is only land. Anchor the east edge to the
+    // terrain instead and let the overhang fall to the seaward side.
+    const eastEdge = Math.max(wx, ex)
+    return { cx: eastEdge - w / 2, cz: (nz + sz) / 2, w, h }
   }, [heightfield, projection])
 
   return (
     <group>
       <mesh geometry={geometry}>
-        <meshStandardMaterial vertexColors flatShading roughness={0.95} />
+        {/* Smooth-shaded: computeVertexNormals() above already produces the
+            normals, and flatShading discarded them, rendering the STRIDE=2
+            grid's ~290 m triangles as hard-edged low-poly facets. */}
+        <meshStandardMaterial vertexColors roughness={0.95} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[sea.cx, SEA_LEVEL_Y, sea.cz]}>
         <planeGeometry args={[sea.w, sea.h]} />
