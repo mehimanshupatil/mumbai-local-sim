@@ -6,7 +6,7 @@ import type { NetworkData } from '../data/network-types'
 import { TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { buildTrackPolylines, terminusFanStub } from './track-geometry'
+import { buildTrackPolylines, terminusStub } from './track-geometry'
 import { createTrackTexture } from './track-texture'
 import { WRBoard } from './WRBoard'
 
@@ -25,6 +25,13 @@ const TRACK_WIDTH_SCENE_M = 13
  * config.ts's RENDER_EXAGGERATION comment).
  */
 const TRACK_TILE_LENGTH_SCENE_M = 60
+/** Buffer stop at the end of each Churchgate platform road. Sized to read
+ * from the station camera rather than to scale, like the rest of the
+ * trackside dressing. */
+const BUFFER_W = 16
+const BUFFER_H = 9
+const BUFFER_D = 5
+const BUFFER_COLOR = '#5a3a34'
 const STATION_COLOR = '#7b1fa2'
 const FAST_HALT_COLOR = '#e0a020'
 /** WRBoard's own text is sized for close-up reading (see StationDressing);
@@ -99,18 +106,24 @@ export function Corridor({
   night: number
   onSelectStation: (stationId: string) => void
 }) {
-  const tracks = useMemo(() => {
+  const { tracks, buffers } = useMemo(() => {
     const polylines = buildTrackPolylines(network, projection, TRACK_SPACING_SCENE_M)
     // Churchgate's tracks are always the first `tracks`-many polylines here,
     // since buildTrackPolylines walks sections in order starting at chainage 0.
     const churchgateTracks = network.sections[0].tracks
-    const fan = terminusFanStub(network, projection, TRACK_SPACING_SCENE_M, churchgateTracks)
-    return polylines.map((t, i) => {
-      const stub = i < churchgateTracks ? fan[i] : []
-      return [...stub, ...t.points].map(
-        ([x, z]) => [x, heightfield.railY(x, z) + TRACK_LIFT, z] as [number, number, number],
-      )
-    })
+    const stubs = terminusStub(network, projection, TRACK_SPACING_SCENE_M, churchgateTracks)
+    return {
+      tracks: polylines.map((t, i) => {
+        const stub = i < churchgateTracks ? stubs[i].points : []
+        return [...stub, ...t.points].map(
+          ([x, z]) => [x, heightfield.railY(x, z) + TRACK_LIFT, z] as [number, number, number],
+        )
+      }),
+      buffers: stubs.map(({ buffer: [x, z], angleRad }) => ({
+        position: [x, heightfield.railY(x, z), z] as [number, number, number],
+        angleRad,
+      })),
+    }
   }, [network, projection, heightfield])
   const trackGeometries = useMemo(() => tracks.map((t) => trackRibbonGeometry(t)), [tracks])
   const gl = useThree((s) => s.gl)
@@ -203,6 +216,14 @@ export function Corridor({
       {trackGeometries.map((geo, i) => (
         <mesh key={i} geometry={geo}>
           <meshStandardMaterial map={trackTexture} roughness={0.95} />
+        </mesh>
+      ))}
+      {/* One buffer stop per platform road, square across the rails — what a
+          terminus ends in, and what tells the eye the line stops here. */}
+      {buffers.map(({ position: [x, y, z], angleRad }, i) => (
+        <mesh key={`buffer-${i}`} position={[x, y + BUFFER_H / 2, z]} rotation={[0, angleRad, 0]}>
+          <boxGeometry args={[BUFFER_W, BUFFER_H, BUFFER_D]} />
+          <meshStandardMaterial color={BUFFER_COLOR} roughness={0.85} />
         </mesh>
       ))}
       {network.stations.map((s, i) => (

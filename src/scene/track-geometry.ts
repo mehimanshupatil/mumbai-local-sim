@@ -238,19 +238,30 @@ export function poseAt(track: TrainTrack, chainageM: number, alongOffsetSceneM =
 }
 
 /**
- * Decorative rail convergence south of Churchgate (chainage 0, the line's
- * southern terminus), where the running lines would taper into a real
- * terminus throat/buffer-stop concourse instead of just stopping. Purely
- * visual: the taper only starts SAFE_ZONE_M past chainage 0, clear of where
- * a dwelling rake's overshot nose renders (see Fleet.tsx's refOffset), so it
- * never crosses a train.
+ * How far the platform roads run past Churchgate (chainage 0) before the
+ * buffer stops. Has to clear the deepest a dwelling rake's cab nose reaches
+ * south of the station (~PLATFORM_NOSE_OFFSET_M + NOSE_L, see rake-geometry),
+ * or a berthed train renders through its own buffers.
  */
-export function terminusFanStub(
+export const TERMINUS_STUB_M = 360
+
+/**
+ * The stub of track south of Churchgate, the line's southern terminus, where
+ * the corridor data stops but the platforms carry on.
+ *
+ * Parallel, and square-ended at the buffers. It used to taper: the roads
+ * converged to a single point ~690 m out, on the theory that a terminus is a
+ * throat. It is the opposite — a throat is where roads *gather* on the
+ * approach from the country end, while past the platforms they simply stop,
+ * each at its own buffer stop. Drawn as a taper it read as the four tracks
+ * being bunched into a knot beyond the station.
+ */
+export function terminusStub(
   network: NetworkData,
   projection: Projection,
   spacingM: number,
   sectionTracks: number,
-): [number, number][][] {
+): { points: [number, number][]; buffer: [number, number]; angleRad: number }[] {
   const centerline = network.corridor.map(projection.toScene)
   const [ox, oz] = centerline[0]
   const [nx, nz] = centerline[1]
@@ -261,25 +272,15 @@ export function terminusFanStub(
   const dirZ = dz / len
   const normX = -dz / len
   const normZ = dx / len
-  // Clear of the deepest a dwelling rake's cab nose overshoots south of
-  // Churchgate (~PLATFORM_NOSE_OFFSET_M + NOSE_L, see Fleet.tsx), plus margin.
-  const SAFE_ZONE_M = 340
-  const TAPER_LEN_M = 350
-  const TAPER_STEPS = 4
-  const stubs: [number, number][][] = []
+  const angleRad = Math.atan2(dirX, dirZ)
+  const stubs: { points: [number, number][]; buffer: [number, number]; angleRad: number }[] = []
   for (let t = 0; t < sectionTracks; t++) {
-    const off = (t - (sectionTracks - 1) / 2) * spacingM
-    const stub: [number, number][] = []
-    for (let step = 0; step <= TAPER_STEPS; step++) {
-      // 0 at the deep (fully converged) end, 1 at the safe-zone boundary
-      // (still full spacing) — eased so the convergence reads as a curve
-      // rather than one hard-kinked straight segment.
-      const u = step / TAPER_STEPS
-      const eased = u * u * (3 - 2 * u)
-      const s = SAFE_ZONE_M + TAPER_LEN_M * (1 - u)
-      stub.push([ox - dirX * s + normX * off * eased, oz - dirZ * s + normZ * off * eased])
-    }
-    stubs.push(stub)
+    const off = centeredOffset(t, sectionTracks, spacingM)
+    const end: [number, number] = [
+      ox - dirX * TERMINUS_STUB_M + normX * off,
+      oz - dirZ * TERMINUS_STUB_M + normZ * off,
+    ]
+    stubs.push({ points: [end], buffer: end, angleRad })
   }
   return stubs
 }
@@ -440,10 +441,14 @@ function sectionSampleStations(
  */
 export function corridorSampleStations(network: NetworkData, track: TrainTrack): number[] {
   const total = track.lengths[track.lengths.length - 1]
+  // Negative stations carry the bed out under the terminus stub (see
+  // terminusStub): the corridor data stops at Churchgate, but the platform
+  // roads run on to the buffers, and without this they run on over bare grass.
   const all: number[] = []
+  for (let m = -TERMINUS_STUB_M; m < 0; m += TURNOUT_SAMPLE_STEP_M) all.push(m)
   for (let s = 0; s < network.sections.length; s++) {
     for (const m of sectionSampleStations(network.sections, s, track.lengths, track.scale)) {
-      all.push(Math.max(0, Math.min(total, m)))
+      all.push(Math.min(total, m))
     }
   }
   return [...new Set(all)].sort((a, b) => a - b)
