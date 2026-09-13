@@ -157,6 +157,102 @@ function countSkippedStations(run: RawStop[]): number {
 }
 
 /**
+ * The PTT publishes times to the minute, so two services on the same line can
+ * be printed at the identical station-minute — and taking that literally puts
+ * them at the same second, 0 m apart, on top of each other.
+ *
+ * Each service is shifted by a whole number of seconds inside its own
+ * published minute, the same shift at every one of its stops so legs are
+ * untouched, chosen to hold it as far as possible from services already
+ * placed at the same station-minute on the same line. A service nudged to
+ * 09:14:20 still *shows* 09:14: the published data has 60 s granularity and
+ * this resolves an ambiguity it never expressed rather than contradicting it.
+ * A headway hold *would* contradict it, which is why holds are out of scope.
+ *
+ * Greedy and order-dependent, so services are placed in a fixed order and the
+ * whole pass is deterministic: same input, byte-identical output.
+ */
+const MINUTE_S = 60
+
+function deRoundWithinMinute(services: RealService[]): void {
+  /** Times already claimed, by line, station and published minute. */
+  const claimed = new Map<string, number[]>()
+  const key = (track: number, stationId: string, t: number) =>
+    `${track}:${stationId}:${Math.floor(t / MINUTE_S)}`
+  const neighbours = (track: number, stationId: string, t: number) => {
+    const minute = Math.floor(t / MINUTE_S)
+    const out: number[] = []
+    for (const m of [minute - 1, minute, minute + 1]) {
+      const held = claimed.get(`${track}:${stationId}:${m}`)
+      if (held) out.push(...held)
+    }
+    return out
+  }
+  for (const svc of [...services].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    let bestOffset = 0
+    let bestGap = -1
+    for (let offset = 0; offset < MINUTE_S; offset++) {
+      let gap = Infinity
+      for (const stop of svc.stops) {
+        for (const other of neighbours(svc.track, stop.stationId, stop.t)) {
+          gap = Math.min(gap, Math.abs(stop.t + offset - other))
+        }
+      }
+      if (gap > bestGap) {
+        bestGap = gap
+        bestOffset = offset
+      }
+      if (gap === Infinity) break // nothing to avoid; the first offset will do
+    }
+    for (const stop of svc.stops) {
+      stop.t += bestOffset
+      const k = key(svc.track, stop.stationId, stop.t)
+      const held = claimed.get(k)
+      if (held) held.push(stop.t)
+      else claimed.set(k, [stop.t])
+    }
+  }
+}
+
+/**
+ * Same-line pairs that genuinely cross — one passes the other between two
+ * stations they share. Separating those needs holds longer than the published
+ * minute can absorb, which would move a service off its printed time, so they
+ * are counted and left alone rather than resolved (see #22, #24).
+ */
+function countOvertakingPairs(services: RealService[]): number {
+  const byLine = new Map<number, RealService[]>()
+  for (const svc of services) {
+    const line = byLine.get(svc.track)
+    if (line) line.push(svc)
+    else byLine.set(svc.track, [svc])
+  }
+  let overtakes = 0
+  for (const line of byLine.values()) {
+    for (let i = 0; i < line.length; i++) {
+      const a = new Map(line[i].stops.map((s) => [s.stationId, s.t]))
+      for (let j = i + 1; j < line.length; j++) {
+        let sign = 0
+        let crossed = false
+        for (const stop of line[j].stops) {
+          const t = a.get(stop.stationId)
+          if (t === undefined) continue
+          const next = Math.sign(t - stop.t)
+          if (next === 0) continue
+          if (sign !== 0 && next !== sign) {
+            crossed = true
+            break
+          }
+          sign = next
+        }
+        if (crossed) overtakes++
+      }
+    }
+  }
+  return overtakes
+}
+
+/**
  * A leg no train could have run: long enough to be a real gap, yet implying a
  * crawl. The 989xx short-workings carry 75-80 minute legs over 4-8 km, which
  * is the grid extraction picking a time out of an adjacent train's column
@@ -279,6 +375,8 @@ function main() {
         direction,
         track: trackFor(serviceType, direction, repaired),
         cars: train.cars,
+        // Sub-minute offsets are applied once every service is in (see
+        // deRoundWithinMinute) — it needs to see them all to place them apart.
         stops: repaired.map((s) => ({
           stationId: stationOf(s.stationId).id,
           t: s.timeSeconds,
@@ -302,6 +400,9 @@ function main() {
       idsDisambiguated++
     }
   }
+
+  deRoundWithinMinute(services)
+  const overtakingPairs = countOvertakingPairs(services)
 
   // --- validate against known reality before committing ---
   const problems: string[] = []
@@ -376,6 +477,9 @@ function main() {
   console.log(`repaired ${stopsRepaired}/${totalRawStops} noise stops, dropped ${runsDroppedTooShort} too-short runs`)
   console.log(
     `dropped ${runsDroppedImpossible} runs with a leg over ${IMPOSSIBLE_LEG_S}s implying under ${IMPOSSIBLE_LEG_KMH} km/h`,
+  )
+  console.log(
+    `${overtakingPairs} same-line pairs genuinely cross — left as published, they need holds longer than a minute`,
   )
   console.log(`AC: ${acCount}, down turnbacks:`, Object.fromEntries(downSlowTermini))
   console.log(`wrote ${OUT_PATH}`)

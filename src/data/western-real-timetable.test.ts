@@ -58,6 +58,42 @@ describe('baked real timetable (WR Public Time Tables)', () => {
     }
   })
 
+  // The PTT prints times to the minute, so two services on the same line can
+  // be published at the identical station-minute — 396 stop events were, and
+  // taking that literally put them at the same second, 0 m apart. The bake
+  // shifts each service within its own published minute (#22): the same whole
+  // number of seconds at every one of its stops, so legs are untouched and the
+  // minute it displays is unchanged.
+  it('shifts each service by one offset inside its own published minute', () => {
+    for (const svc of timetable.services) {
+      const offsets = new Set(svc.stops.map((s) => ((s.t % 60) + 60) % 60))
+      expect(offsets.size, `${svc.id} has stops shifted by different amounts`).toBe(1)
+      const [offset] = [...offsets]
+      expect(offset, svc.id).toBeGreaterThanOrEqual(0)
+      expect(offset, svc.id).toBeLessThan(60)
+    }
+  })
+
+  it('leaves no two same-line services arriving within 10 s of each other', () => {
+    const events = new Map<string, { id: string; t: number }[]>()
+    for (const svc of timetable.services) {
+      for (const stop of svc.stops) {
+        const key = `${svc.track}:${stop.stationId}`
+        const list = events.get(key)
+        if (list) list.push({ id: svc.id, t: stop.t })
+        else events.set(key, [{ id: svc.id, t: stop.t }])
+      }
+    }
+    const tooClose: string[] = []
+    for (const list of events.values()) {
+      list.sort((a, b) => a.t - b.t)
+      for (let i = 1; i < list.length; i++) {
+        if (list[i].t - list[i - 1].t < 10) tooClose.push(`${list[i - 1].id}/${list[i].id}`)
+      }
+    }
+    expect(tooClose, tooClose.slice(0, 5).join(', ')).toHaveLength(0)
+  })
+
   // A leg long enough to be a real gap yet implying a crawl is the grid
   // extraction reading a time out of an adjacent train's column. 66 such
   // services were shipping before #21, one of them covering 1.5 km in twelve
