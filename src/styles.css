@@ -275,3 +275,206 @@ body {
   color: #c6cdd8;
   pointer-events: none;
 }
+
+/* --- live line diagram (StripMap) --- */
+.strip {
+  position: absolute;
+  top: 64px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 10;
+  width: 172px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(11, 14, 20, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.strip-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.strip-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #cfd3da;
+}
+
+.strip-count {
+  font-size: 11px;
+  color: #8b93a1;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip-toggle {
+  margin-left: auto;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: #cfd3da;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.strip-toggle-closed {
+  position: absolute;
+  top: 64px;
+  left: 16px;
+  z-index: 10;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(11, 14, 20, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+}
+
+.strip-body {
+  position: relative;
+  flex: 1;
+  margin: 6px 0;
+}
+
+/* The line itself — every station tick and train dot is positioned against it. */
+.strip-rail {
+  position: absolute;
+  left: 26px;
+  top: 3%;
+  bottom: 3%;
+  width: 2px;
+  margin-left: -1px;
+  background: linear-gradient(rgba(123, 31, 162, 0.5), rgba(123, 31, 162, 0.9));
+  border-radius: 2px;
+}
+
+.strip-stn {
+  position: absolute;
+  left: 26px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.strip-tick {
+  width: 7px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.45);
+  border-radius: 1px;
+  flex: none;
+}
+
+.strip-stn-fast .strip-tick {
+  width: 11px;
+  height: 3px;
+  background: #e0a020;
+}
+
+.strip-name {
+  position: absolute;
+  left: 32px;
+  font-size: 9.5px;
+  color: #aab1bd;
+  letter-spacing: 0.01em;
+}
+
+.strip-stn-fast .strip-name {
+  color: #e8e8e8;
+  font-weight: 600;
+}
+
+.strip-stn:hover .strip-name {
+  color: #fff;
+}
+
+.strip-stn-on .strip-tick {
+  background: #fff;
+  width: 13px;
+  height: 3px;
+}
+
+.strip-stn-on .strip-name {
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Trains: up services ride the left of the rail, down the right, so the two
+   directions never sit on top of each other. */
+.strip-train {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: top 0.25s linear;
+}
+
+.strip-up {
+  left: 18px;
+}
+
+.strip-down {
+  left: 34px;
+}
+
+.strip-train-slow {
+  background: #e8e8e8;
+}
+
+.strip-train-fast {
+  background: #e0a020;
+}
+
+.strip-train-ac {
+  background: #3a7bd5;
+}
+
+.strip-train-express {
+  background: #b8564f;
+}
+
+/* Dwelling = stopped at a platform, drawn hollow so a held train reads as
+   held rather than as one more dot in the queue. */
+.strip-dwell {
+  box-shadow: inset 0 0 0 2px rgba(11, 14, 20, 0.85);
+}
+
+.strip-train-on {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.strip-train:hover {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 1px;
+}
+
+.strip-foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 9.5px;
+  color: #8b93a1;
+}

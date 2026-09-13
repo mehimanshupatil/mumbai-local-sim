@@ -10,6 +10,7 @@ import { ClockControls } from './ClockControls'
 import { FollowHint } from './FollowHint'
 import { Scene } from './scene/Scene'
 import { StationCard } from './StationCard'
+import { StripMap } from './StripMap'
 
 export function App() {
   const [focus, setFocus] = useState<Focus>({ mode: 'free' })
@@ -35,6 +36,7 @@ export function App() {
         <ClockControls />
       </header>
       <Scene focus={focus} onFocus={setFocus} />
+      <StripMap focus={focus} onFocus={setFocus} />
       {focus.mode === 'station' && (
         <StationCard stationId={focus.stationId} onClose={() => setFocus({ mode: 'free' })} />
       )}

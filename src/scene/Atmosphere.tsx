@@ -15,13 +15,15 @@ import { useFrame } from '@react-three/fiber'
 import type { FogExp2 } from 'three'
 
 /**
- * Fog reaches ~50% opacity at 2.6 view-distances out (f = 1 - exp(-(d*k)^2)),
- * which leaves the subject clear and hazes the horizon behind it.
+ * Fog reaches ~50% opacity at ~3 view-distances out (f = 1 - exp(-(d*k)^2)),
+ * which leaves the subject and its surroundings clear and hazes only what is
+ * well behind them. Pushed much past this the ground around a station starts
+ * washing out, which reads as a dirty lens rather than as distance.
  */
-const FOG_K = 0.42
+const FOG_K = 0.28
 /** Never so thin it does nothing, never so thick the subject fogs up. */
 const MIN_DENSITY = 1.5e-6
-const MAX_DENSITY = 2.4e-4
+const MAX_DENSITY = 1.1e-4
 
 export function Atmosphere({ color }: { color: string }) {
   const fog = useRef<FogExp2>(null)
