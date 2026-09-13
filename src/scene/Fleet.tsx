@@ -7,23 +7,22 @@ import type { ServiceType } from '../sim/types'
 import {
   COACH_GAP_SCENE_M,
   COACH_LENGTH_SCENE_M,
-  TRACK_SPACING_SCENE_M,
 } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import {
   buildYardRoadTracks,
   COACHES,
-  laneFor,
   laneLateralAtChainage,
   NOSE_L,
   PARKED_RAKE_CHAINAGE_M,
   platformNoseOffsetM,
   RAKE_LEN,
   roadForSlot,
+  separateOverlaps,
 } from './rake-geometry'
 import { simClock } from './sim-clock'
-import { buildTrainTrack, poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
+import { buildTrainTrack, poseAt, type TrainTrack } from './track-geometry'
 
 const BODY_W = 18
 const BODY_H = 18
@@ -32,17 +31,6 @@ const MAX_RAKES = 128
 /** Rakes fatten up to BULK_MAX x as the camera passes BULK_DISTANCE_M away. */
 const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
-/**
- * Rake-overlap deconfliction for two trains folded onto the same drawn lane
- * (no signalling model keeps them apart in time — see laneFor above). Full
- * push is held across the whole gap range where two ~RAKE_LEN-long bodies
- * could be overlapping lengthwise, then fades out over NUDGE_FADE_M so it
- * never pops once they're already clear. Push magnitude is one extra
- * half-lane each side, enough to clear BODY_W with margin.
- */
-const NUDGE_FULL_RANGE_M = RAKE_LEN
-const NUDGE_FADE_M = 200
-const NUDGE_MAX_M = TRACK_SPACING_SCENE_M / 2
 
 /** A box tapered toward +z: the EMU cab nose. */
 function noseGeometry(): BoxGeometry {
@@ -128,47 +116,32 @@ export function Fleet({
       warnedCapacity = true
       console.warn(`Fleet: ${states.length} concurrent rakes exceed capacity ${MAX_RAKES}; truncating`)
     }
+    // Where each rake will actually be drawn: nose shifted to the platform
+    // edge on an approach or departure, lateral eased between lanes across a
+    // section boundary. Deconfliction has to run on *these* numbers — see
+    // separateOverlaps — not on chainage and lane index.
     const rakes = states.map((state) => {
-      const section = sectionAtChainage(sections, state.chainageM)
-      return { state, section, lane: laneFor(state.track, section.tracks), nudge: 0 }
-    })
-    // Narrow sections fold several logical lanes onto one drawn lane (see
-    // laneFor above), and there's no block-signalling model keeping same-lane
-    // rakes apart in time — so two can legitimately be scheduled through the
-    // same physical space at once (an overtake with no passing loop to draw
-    // it on). Nudge them sideways while close so they read as two trains
-    // instead of one interpenetrating blob; it fades out once they clear.
-    const laneGroups = new Map<string, typeof rakes>()
-    for (const r of rakes) {
-      if (r.state.parkedYardId) continue // posed on its own yard siding, not a corridor lane
-      if (r.section.tracks >= 6) continue // every semantic lane has its own track; never folded
-      const key = `${r.section.fromM}-${r.lane}`
-      const g = laneGroups.get(key)
-      if (g) g.push(r)
-      else laneGroups.set(key, [r])
-    }
-    // Adjacent pairs only — a third rake caught between two close neighbours
-    // can have its pushes partially cancel. Rare enough at real service
-    // density in a narrow section not to chase further here.
-    for (const group of laneGroups.values()) {
-      if (group.length < 2) continue
-      group.sort((a, b) => a.state.chainageM - b.state.chainageM)
-      for (let i = 1; i < group.length; i++) {
-        const a = group[i - 1]
-        const b = group[i]
-        const gap = b.state.chainageM - a.state.chainageM
-        if (gap >= NUDGE_FULL_RANGE_M + NUDGE_FADE_M) continue
-        const push =
-          gap <= NUDGE_FULL_RANGE_M
-            ? NUDGE_MAX_M
-            : NUDGE_MAX_M * (1 - (gap - NUDGE_FULL_RANGE_M) / NUDGE_FADE_M)
-        a.nudge -= push
-        b.nudge += push
+      const dirSign = state.direction === 'down' ? 1 : -1
+      const nextStopChainageM = stationChainageById.get(state.nextStopId) ?? state.chainageM
+      const refOffset = state.parkedYardId
+        ? 0
+        : dirSign * platformNoseOffsetM(state.chainageM, nextStopChainageM, state.legDistanceM)
+      return {
+        state,
+        dirSign,
+        refOffset,
+        along: state.chainageM + refOffset,
+        lateral: state.parkedYardId
+          ? 0
+          : laneLateralAtChainage(sections, state.track, state.chainageM),
       }
-    }
+    })
+    // Parked rakes stand on their own roads and share no space with anything
+    // on the corridor, so they take no part in this.
+    separateOverlaps(rakes.filter((r) => !r.state.parkedYardId))
     let n = 0
     let rake = 0
-    for (const { state, nudge } of rakes) {
+    for (const { state, dirSign: baseDirSign, refOffset: baseRefOffset, lateral: drawnLateral } of rakes) {
       if (n >= MAX_RAKES * COACHES) break
       const livery = LIVERY[state.serviceType]
       // Parked rakes (ticket #17) pose on their own yard siding instead of
@@ -176,10 +149,10 @@ export function Fleet({
       const roads = state.parkedYardId ? yardRoads.get(state.parkedYardId) : undefined
       const yardTrack = roads ? roadForSlot(roads, state.parkedSlot) : undefined
       const track: TrainTrack = yardTrack ?? centerTrack
-      let lateral = laneLateralAtChainage(sections, state.track, state.chainageM) + nudge
-      let dirSign = state.direction === 'down' ? 1 : -1
+      let lateral = drawnLateral
+      let dirSign = baseDirSign
       let trackChainageM = state.chainageM
-      let refOffset = 0
+      let refOffset = baseRefOffset
       if (yardTrack) {
         lateral = 0 // the road itself is already offset; see rake-geometry
         dirSign = 1 // nose points from the junction into the yard

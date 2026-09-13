@@ -192,3 +192,68 @@ export function platformNoseOffsetM(
   const depart = edgeBlend(legDistanceM)
   return PLATFORM_NOSE_OFFSET_M * Math.max(approach, depart)
 }
+
+/** Lateral gap two rakes need before their bodies stop interpenetrating. */
+const CLEAR_M = 22
+/** Relaxation passes, so a rake pushed off one neighbour also clears the next. */
+const SEPARATION_PASSES = 3
+/** Fraction of a rake length the bodies must draw apart before the push
+ * starts easing off. Fading from the moment they touch leaves the
+ * half-overlapping pairs — the obvious ones — barely pushed at all. */
+const FADE_FROM = 0.75
+
+export interface DrawnRake {
+  /** Along-corridor position of the rake as drawn, nose offset included. */
+  along: number
+  /** Offset from the corridor centreline as drawn; this is what gets pushed. */
+  lateral: number
+}
+
+/**
+ * Pushes rakes apart sideways until none of them interpenetrate, working on
+ * where they are actually *drawn*.
+ *
+ * There is no block-signalling model — that needs real block occupancy in the
+ * sim and is out of scope — so the timetable legitimately puts two services
+ * through the same stretch at once, and drawing a 12-car rake at more than
+ * twice true length (see config.ts) makes near-misses into overlaps too. Both
+ * end as two trains inside each other.
+ *
+ * Deconflicting on chainage and lane index, as this used to, misses most of
+ * it: what the viewer sees is offset from the chainage by the platform-nose
+ * blend, and adjacent sections' lanes are not comparable by index at all.
+ * Pairs that shared drawn space while their chainages were a rake-length
+ * apart were never pushed. Comparing drawn positions catches those, and a few
+ * relaxation passes handle a third rake caught between two neighbours, whose
+ * pushes used to cancel.
+ */
+export function separateOverlaps(rakes: DrawnRake[]): void {
+  if (rakes.length < 2) return
+  const order = rakes.map((_, i) => i).sort((a, b) => rakes[a].along - rakes[b].along)
+  for (let pass = 0; pass < SEPARATION_PASSES; pass++) {
+    let moved = false
+    for (let i = 0; i < order.length; i++) {
+      const a = rakes[order[i]]
+      for (let j = i + 1; j < order.length; j++) {
+        const b = rakes[order[j]]
+        const along = b.along - a.along
+        if (along >= RAKE_LEN) break // sorted: nothing further along can overlap either
+        const gap = b.lateral - a.lateral
+        const deficit = CLEAR_M - Math.abs(gap)
+        if (deficit <= 0) continue
+        // Full push while the bodies genuinely overlap, easing out only over
+        // the last stretch as they draw apart, so a push never appears or
+        // vanishes in one frame but also never gives up while it is needed.
+        const strength = 1 - smoothstep((along - RAKE_LEN * FADE_FROM) / (RAKE_LEN * (1 - FADE_FROM)))
+        // Ties (exactly the same lateral) split by a stable rule rather than
+        // by whichever happened to be first, so the pair does not flicker.
+        const dir = gap === 0 ? (order[i] < order[j] ? -1 : 1) : Math.sign(gap)
+        const push = (deficit / 2) * strength * dir
+        a.lateral -= push
+        b.lateral += push
+        moved = true
+      }
+    }
+    if (!moved) break
+  }
+}
