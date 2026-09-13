@@ -45,6 +45,34 @@ const BOARD_FADE_FAR = 12000
  * local track curve on a bend (e.g. Bandra, Dadar) without a visible facet. */
 const PLATFORM_STEPS = 6
 const BUILDINGS_PER_STATION = IS_COARSE_POINTER ? 8 : 24
+/**
+ * Lit windows after dark. The city was a field of unlit boxes at night — the
+ * only light on the map came from the platform lamps and the rakes' own
+ * window strips, so a 124 km corridor read as empty ground. These are their
+ * own instanced mesh rather than an emissive term on the buildings, because
+ * instanceColor only multiplies the diffuse colour: a material-level emissive
+ * lights every block identically, whereas scattering separate window quads
+ * gives each block its own pattern of lit and dark.
+ */
+const WINDOWS_PER_BUILDING = IS_COARSE_POINTER ? 4 : 10
+/** Sized like everything else here — a true-scale window is sub-pixel even
+ * at the station camera's ~2.3 km (see config.ts's RENDER_EXAGGERATION). */
+const WINDOW_W = 15
+const WINDOW_H = 9
+const WINDOW_COLOR = '#ffd9a0'
+/**
+ * Street lighting. Windows alone only read from close in — from corridor
+ * altitude a lit facade is sub-pixel and the city went black again. These are
+ * small emissive points at head height, dense enough that each station reads
+ * as a pool of light on an otherwise dark coast.
+ */
+const LAMPS_PER_STATION = IS_COARSE_POINTER ? 25 : 80
+const LAMP_COLOR = '#ffb765'
+const LAMP_RADIUS = 3.5
+const LAMP_HEIGHT = 12
+/** Buildings with any lights on at all — the rest stay dark, so the city
+ * doesn't read as uniformly occupied at 03:00. */
+const LIT_BUILDING_SHARE = 0.72
 
 /** Deterministic PRNG so the city never reshuffles between loads. */
 function mulberry32(seed: number) {
@@ -261,6 +289,8 @@ export function StationDressing({
   const buildingInstances = useMemo(() => {
     const matrices: Matrix4[] = []
     const colors: Color[] = []
+    const windows: Matrix4[] = []
+    const lamps: Matrix4[] = []
     const q = new Quaternion()
     const up = new Vector3(0, 1, 0)
     stations.forEach((s, si) => {
@@ -270,6 +300,22 @@ export function StationDressing({
       const fx = Math.sin(s.angleRad)
       const fz = Math.cos(s.angleRad)
       const corridorHalf = (s.tracks * TRACK_SPACING_SCENE_M) / 2 + PLATFORM_W + 40
+      for (let i = 0; i < LAMPS_PER_STATION; i++) {
+        const side = rand() > 0.5 ? 1 : -1
+        const lateral = corridorHalf + rand() * 900
+        const along = (rand() - 0.5) * 2000
+        const lx = s.x + nx * lateral * side + fx * along
+        const lz = s.z + nz * lateral * side + fz * along
+        const lground = heightfield.sceneY(lx, lz)
+        if (lground < 2) continue
+        lamps.push(
+          new Matrix4().compose(
+            new Vector3(lx, lground + LAMP_HEIGHT, lz),
+            new Quaternion(),
+            new Vector3(1, 1, 1),
+          ),
+        )
+      }
       for (let i = 0; i < BUILDINGS_PER_STATION; i++) {
         const side = rand() > 0.5 ? 1 : -1
         const lateral = corridorHalf + 40 + rand() * 700
@@ -287,9 +333,39 @@ export function StationDressing({
         )
         const shade = 0.55 + rand() * 0.25
         colors.push(new Color(shade, shade * 0.98, shade * 0.94))
+        if (rand() > LIT_BUILDING_SHARE) continue
+        const lit = 1 + Math.floor(rand() * WINDOWS_PER_BUILDING)
+        for (let k = 0; k < lit; k++) {
+          // One facade each, inset a hair so the quad never z-fights the wall.
+          const face = Math.floor(rand() * 4)
+          const u = (rand() - 0.5) * 0.7
+          const wy = ground + h * (0.15 + rand() * 0.7)
+          const half = { x: w / 2, z: d / 2 }
+          const local: [number, number] =
+            face === 0
+              ? [u * w, half.z]
+              : face === 1
+                ? [u * w, -half.z]
+                : face === 2
+                  ? [half.x, u * d]
+                  : [-half.x, u * d]
+          const yaw = s.angleRad + (face < 2 ? 0 : Math.PI / 2)
+          const cos = Math.cos(s.angleRad)
+          const sin = Math.sin(s.angleRad)
+          const wx = x + local[0] * cos + local[1] * sin
+          const wz = z - local[0] * sin + local[1] * cos
+          q.setFromAxisAngle(up, yaw)
+          windows.push(
+            new Matrix4().compose(
+              new Vector3(wx, wy, wz),
+              q.clone(),
+              new Vector3(WINDOW_W, WINDOW_H, WINDOW_W),
+            ),
+          )
+        }
       }
     })
-    return { matrices, colors }
+    return { matrices, colors, windows, lamps }
   }, [stations, heightfield])
 
   return (
@@ -316,6 +392,40 @@ export function StationDressing({
       >
         <boxGeometry args={[1, 1, 1]} />
         <meshStandardMaterial roughness={0.95} />
+      </instancedMesh>
+      <instancedMesh
+        visible={night > 0.03}
+        args={[undefined, undefined, Math.max(1, buildingInstances.lamps.length)]}
+        ref={applyMatrices(buildingInstances.lamps)}
+        frustumCulled={false}
+      >
+        <sphereGeometry args={[LAMP_RADIUS, 6, 4]} />
+        <meshStandardMaterial
+          color="#0a0805"
+          emissive={LAMP_COLOR}
+          emissiveIntensity={night * 2.6}
+          toneMapped={false}
+        />
+      </instancedMesh>
+      {/* Drawn only after dark: by day these would be a speckle of grey dots
+          on every facade, and unlike the rakes' window strips they have no
+          daytime reading of their own. */}
+      <instancedMesh
+        visible={night > 0.03}
+        args={[undefined, undefined, Math.max(1, buildingInstances.windows.length)]}
+        ref={applyMatrices(buildingInstances.windows)}
+        frustumCulled={false}
+      >
+        <planeGeometry args={[1, 1]} />
+        {/* Unlit by tone mapping so the glow stays hot against a dark city
+            and reads as a light source rather than a pale grey patch. */}
+        <meshStandardMaterial
+          color="#120d06"
+          emissive={WINDOW_COLOR}
+          emissiveIntensity={night * 2.2}
+          toneMapped={false}
+          side={DoubleSide}
+        />
       </instancedMesh>
       {stations.map((s, i) => (
         <Billboard

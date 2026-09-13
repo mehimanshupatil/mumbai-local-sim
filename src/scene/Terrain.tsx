@@ -9,6 +9,23 @@ import { WaterMaterial } from './WaterMaterial'
 
 /** Grid decimation: 1 = full heightfield resolution. */
 const STRIDE = 2
+/**
+ * How far the terrain's border ring is extruded outward, flat, at its own
+ * edge height and colour. The baked heightfield is a finite ~90x180 km plate,
+ * and past its edge the world simply stopped: a pale band of bare sky sat
+ * east of the Sahyadris even in the default top-down view, and any tilt
+ * turned it into a cliff hanging in mid-air. A skirt continues the land to
+ * well past the far plane, where haze finishes the job (see Atmosphere).
+ */
+const SKIRT_M = 400_000
+/**
+ * What the skirt fades to at its outer edge. Carrying each border vertex's
+ * own colour all the way out smears the ramp into 400 km-long stripes; every
+ * outer vertex sharing one dull inland tone turns that into a single gradient
+ * away from the data instead.
+ */
+const HORIZON_COLOR = new Color('#6f7b5e')
+const HORIZON_MIX = 0.93
 
 /**
  * Clearance above the sea plane for any vertex the ramp still colours as land.
@@ -172,7 +189,46 @@ export function Terrain({
       positions[idx * 3 + 1] = isSea[idx] ? y : Math.max(y, floor)
     }
 
-    const index = new Uint32Array((w - 1) * (h - 1) * 6)
+    // Border ring, extruded outward from each edge vertex — same height and
+    // colour, so the join is seamless and the land just keeps going.
+    const border: number[] = []
+    for (let gx = 0; gx < w; gx++) border.push(gx)
+    for (let gy = 1; gy < h; gy++) border.push(gy * w + w - 1)
+    for (let gx = w - 2; gx >= 0; gx--) border.push((h - 1) * w + gx)
+    for (let gy = h - 2; gy >= 1; gy--) border.push(gy * w)
+    const skirtPos = new Float32Array((w * h + border.length) * 3)
+    const skirtCol = new Float32Array((w * h + border.length) * 3)
+    skirtPos.set(positions)
+    skirtCol.set(colors)
+    border.forEach((idx, j) => {
+      const o = (w * h + j) * 3
+      const x = positions[idx * 3]
+      const z = positions[idx * 3 + 2]
+      // Straight out of the edge this vertex sits on — corners, which are on
+      // two edges at once, go diagonally. Extruding radially from the plate's
+      // centre instead fans the whole ring into a starburst of long thin
+      // triangles at wildly different heights, which is exactly what it looks
+      // like on screen.
+      const gx = idx % w
+      const gy = (idx / w) | 0
+      const sx = gx === 0 ? -1 : gx === w - 1 ? 1 : 0
+      const sz = gy === 0 ? -1 : gy === h - 1 ? 1 : 0
+      const len = Math.hypot(sx, sz) || 1
+      // x follows gx (west to east), z follows gy (north to south).
+      skirtPos[o] = x + (sx / len) * SKIRT_M
+      // Tapered most of the way down to the coastal plain: the border can be
+      // 600 m of Sahyadri ridge, and holding that height for 400 km reads as
+      // one impossible plateau filling the eastern sky.
+      skirtPos[o + 1] = positions[idx * 3 + 1] * 0.25
+      skirtPos[o + 2] = z + (sz / len) * SKIRT_M
+      const edge = new Color(colors[idx * 3], colors[idx * 3 + 1], colors[idx * 3 + 2])
+      edge.lerp(HORIZON_COLOR, HORIZON_MIX)
+      skirtCol[o] = edge.r
+      skirtCol[o + 1] = edge.g
+      skirtCol[o + 2] = edge.b
+    })
+
+    const index = new Uint32Array((w - 1) * (h - 1) * 6 + border.length * 6)
     let k = 0
     for (let gy = 0; gy < h - 1; gy++) {
       for (let gx = 0; gx < w - 1; gx++) {
@@ -188,9 +244,25 @@ export function Terrain({
         index[k++] = d
       }
     }
+    for (let j = 0; j < border.length; j++) {
+      const j2 = (j + 1) % border.length
+      const a = border[j]
+      const b = border[j2]
+      const c = w * h + j
+      const d = w * h + j2
+      // Wound the opposite way round from the grid quads above: the ring walks
+      // the border clockwise in x/z, so the grid's own order would face these
+      // downward and cull them.
+      index[k++] = a
+      index[k++] = b
+      index[k++] = c
+      index[k++] = b
+      index[k++] = d
+      index[k++] = c
+    }
     const geo = new BufferGeometry()
-    geo.setAttribute('position', new BufferAttribute(positions, 3))
-    geo.setAttribute('color', new BufferAttribute(colors, 3))
+    geo.setAttribute('position', new BufferAttribute(skirtPos, 3))
+    geo.setAttribute('color', new BufferAttribute(skirtCol, 3))
     geo.setIndex(new BufferAttribute(index, 1))
     geo.computeVertexNormals()
     return geo

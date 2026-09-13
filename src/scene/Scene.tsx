@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { MapControls, Sky, Stars } from '@react-three/drei'
 import { network, timetables, type Focus } from '../app-data'
+import { Atmosphere } from './Atmosphere'
 import { Bridges } from './Bridges'
 import { CameraRig, type ControlsLike } from './CameraRig'
 import { IS_COARSE_POINTER } from './config'
@@ -55,7 +56,10 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       // costs half the frame rate); coarse-pointer devices clamp lower.
       {...(IS_COARSE_POINTER ? { dpr: [1, 1.5] as [number, number] } : {})}
       camera={{
-        position: [cx, distance, cz + distance * 0.25],
+        // Oblique, not top-down: a near-vertical framing reads as a paper map
+        // and flattens 124 km of corridor into a line. From here the line
+        // recedes toward a hazed horizon with sky above it (see Atmosphere).
+        position: [cx, distance * 0.42, cz + distance * 0.5],
         fov: FOV_DEG,
         near: 50,
         far: distance * 6,
@@ -69,6 +73,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       }}
     >
       <color attach="background" args={[daylight.skyColor]} />
+      <Atmosphere color={daylight.skyColor} />
       <Sky sunPosition={daylight.skySunPos} distance={distance * 4} />
       {daylight.night > 0.5 && (
         <Stars radius={distance * 2} depth={distance} count={2500} factor={800} fade />
