@@ -347,6 +347,32 @@ body {
   position: relative;
   flex: 1;
   margin: 6px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.strip-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.strip-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
+}
+
+/*
+ * The diagram's own height: a floor of one row per station, so a name always
+ * has room whatever the window is. 14px is what a 9.5px name needs plus a
+ * hair — set higher, the strip starts scrolling on windows where it used to
+ * fit. min-height lets it stretch to fill a tall panel rather than bunching
+ * at the top, and the parent scrolls when the panel is shorter than the floor.
+ */
+.strip-scale {
+  position: relative;
+  height: calc(var(--rows) * 14px);
+  min-height: 100%;
 }
 
 /* The line itself — every station tick and train dot is positioned against it. */

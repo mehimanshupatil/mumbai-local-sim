@@ -10,7 +10,7 @@
  * Reads the sim directly, like StationCard does. Nothing here touches the 3D
  * layer; trainStates is pure, so polling it is just arithmetic.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { network, timetables, type Focus } from './app-data'
 import { simClock } from './scene/sim-clock'
 import { trainStates } from './sim/simulate'
@@ -62,6 +62,14 @@ export function StripMap({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus)
   const [open, setOpen] = useState(true)
   const openRef = useRef(open)
   openRef.current = open
+  const focusedRef = useRef<HTMLButtonElement>(null)
+
+  // Selecting a station elsewhere (in the scene, say) should not leave its row
+  // scrolled out of sight in a strip too short to show the whole line.
+  const focusedStationId = focus.mode === 'station' ? focus.stationId : null
+  useEffect(() => {
+    focusedRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [focusedStationId, open])
 
   useEffect(() => {
     const tick = () => {
@@ -91,7 +99,7 @@ export function StripMap({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus)
     )
   }
 
-  const focusedStation = focus.mode === 'station' ? focus.stationId : null
+  const focusedStation = focusedStationId
   const focusedTrain = focus.mode === 'follow' ? focus.trainId : null
   const running = dots.length
 
@@ -104,41 +112,51 @@ export function StripMap({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus)
           ◂
         </button>
       </header>
+      {/* The diagram is laid out at a fixed pitch per station and scrolls when
+          the panel is shorter than that needs — positioned purely as a
+          percentage of the panel it squeezed 37 rows into whatever height was
+          going, and on a short window the names landed on top of each other. */}
       <div className="strip-body">
-        <div className="strip-rail" />
-        {network.stations.map((s) => {
-          const top = pctOf(s.chainageM)
-          const focused = focusedStation === s.id
-          return (
+        <div
+          className="strip-scale"
+          style={{ '--rows': network.stations.length } as CSSProperties}
+        >
+          <div className="strip-rail" />
+          {network.stations.map((s) => {
+            const top = pctOf(s.chainageM)
+            const focused = focusedStation === s.id
+            return (
+              <button
+                key={s.id}
+                ref={focused ? focusedRef : undefined}
+                className={`strip-stn${s.fastHalt ? ' strip-stn-fast' : ''}${focused ? ' strip-stn-on' : ''}`}
+                style={{ top: `${top}%` }}
+                onClick={() => onFocus({ mode: 'station', stationId: s.id })}
+                title={s.name}
+              >
+                <span className="strip-tick" />
+                <span className="strip-name">{s.name}</span>
+              </button>
+            )
+          })}
+          {dots.map((d) => (
             <button
-              key={s.id}
-              className={`strip-stn${s.fastHalt ? ' strip-stn-fast' : ''}${focused ? ' strip-stn-on' : ''}`}
-              style={{ top: `${top}%` }}
-              onClick={() => onFocus({ mode: 'station', stationId: s.id })}
-              title={s.name}
-            >
-              <span className="strip-tick" />
-              <span className="strip-name">{s.name}</span>
-            </button>
-          )
-        })}
-        {dots.map((d) => (
-          <button
-            key={d.id}
-            className={[
-              'strip-train',
-              `strip-train-${d.serviceType}`,
-              d.direction === 'up' ? 'strip-up' : 'strip-down',
-              d.dwelling ? 'strip-dwell' : '',
-              focusedTrain === d.id ? 'strip-train-on' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            style={{ top: `${d.pct}%` }}
-            onClick={() => onFocus({ mode: 'follow', trainId: d.id })}
-            title={`${SERVICE_TYPE_LABEL[d.serviceType]} ${d.direction === 'up' ? '↑ Churchgate' : '↓ Dahanu'}`}
-          />
-        ))}
+              key={d.id}
+              className={[
+                'strip-train',
+                `strip-train-${d.serviceType}`,
+                d.direction === 'up' ? 'strip-up' : 'strip-down',
+                d.dwelling ? 'strip-dwell' : '',
+                focusedTrain === d.id ? 'strip-train-on' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              style={{ top: `${d.pct}%` }}
+              onClick={() => onFocus({ mode: 'follow', trainId: d.id })}
+              title={`${SERVICE_TYPE_LABEL[d.serviceType]} ${d.direction === 'up' ? '↑ Churchgate' : '↓ Dahanu'}`}
+            />
+          ))}
+        </div>
       </div>
       <footer className="strip-foot">
         <span className="strip-dir">↑ up</span>
