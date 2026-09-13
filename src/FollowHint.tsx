@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { network, timetables } from './app-data'
+import { network, timetables, type FollowView } from './app-data'
 import { SERVICE_TYPE_LABEL } from './service-labels'
 import { etaMinutes } from './sim/clock'
 import type { ServiceType } from './sim/types'
@@ -14,9 +14,24 @@ interface FollowInfo {
   etaMin: number | null
 }
 
+const VIEWS: { id: FollowView; label: string }[] = [
+  { id: 'chase', label: 'Chase' },
+  { id: 'cab', label: 'Cab' },
+  { id: 'lineside', label: 'Lineside' },
+]
+
 /** Follow-cam hint: service type, destination, and next-stop ETA for the
- * train the camera is locked onto — same data shape as the arrivals board. */
-export function FollowHint({ trainId }: { trainId: string }) {
+ * train the camera is locked onto — same data shape as the arrivals board —
+ * plus the camera-view switch (also on the C key, see App). */
+export function FollowHint({
+  trainId,
+  view,
+  onView,
+}: {
+  trainId: string
+  view: FollowView
+  onView: (v: FollowView) => void
+}) {
   const [info, setInfo] = useState<FollowInfo | null>(null)
 
   useEffect(() => {
@@ -41,6 +56,17 @@ export function FollowHint({ trainId }: { trainId: string }) {
 
   return (
     <div className="follow-hint">
+      <span className="follow-views">
+        {VIEWS.map((v) => (
+          <button
+            key={v.id}
+            className={`follow-view${v.id === view ? ' follow-view-on' : ''}`}
+            onClick={() => onView(v.id)}
+          >
+            {v.label}
+          </button>
+        ))}
+      </span>
       {info && (
         <>
           <span className={`svc svc-${info.serviceType}`}>{SERVICE_TYPE_LABEL[info.serviceType]}</span>{' '}
@@ -54,7 +80,7 @@ export function FollowHint({ trainId }: { trainId: string }) {
           {' · '}
         </>
       )}
-      Esc or click away to release
+      C to cycle view · Esc to release
     </div>
   )
 }

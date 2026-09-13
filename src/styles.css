@@ -478,3 +478,33 @@ body {
   font-size: 9.5px;
   color: #8b93a1;
 }
+
+/* --- follow-cam view switch --- */
+.follow-views {
+  display: inline-flex;
+  gap: 4px;
+  margin-right: 10px;
+  vertical-align: middle;
+}
+
+.follow-view {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #cfd3da;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.follow-view:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.follow-view-on {
+  background: #7b1fa2;
+  border-color: #9c40c4;
+  color: #fff;
+}

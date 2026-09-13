@@ -3,17 +3,10 @@ import { useFrame } from '@react-three/fiber'
 import { BoxGeometry, Color, InstancedMesh, Object3D } from 'three'
 import type { NetworkData } from '../data/network-types'
 import { trainStates, type Timetable } from '../sim/simulate'
-import {
-  TRACK_EXPRESS_DOWN,
-  TRACK_EXPRESS_UP,
-  TRACK_FAST_DOWN,
-  TRACK_FAST_UP,
-  type ServiceType,
-} from '../sim/types'
+import type { ServiceType } from '../sim/types'
 import {
   COACH_GAP_SCENE_M,
   COACH_LENGTH_SCENE_M,
-  PLATFORM_LENGTH_SCENE_M,
   TRACK_SPACING_SCENE_M,
 } from './config'
 import type { Heightfield } from './heightfield'
@@ -21,7 +14,10 @@ import type { Projection } from './projection'
 import {
   buildYardRoadTracks,
   COACHES,
+  laneFor,
+  NOSE_L,
   PARKED_RAKE_CHAINAGE_M,
+  platformNoseOffsetM,
   RAKE_LEN,
   roadForSlot,
 } from './rake-geometry'
@@ -35,37 +31,6 @@ const MAX_RAKES = 128
 /** Rakes fatten up to BULK_MAX x as the camera passes BULK_DISTANCE_M away. */
 const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
-const NOSE_L = 14
-/** How close a dwelling rake's nose pulls up to the platform's far edge (in
- * the direction of travel) — a real driver pulls up as far as the starter
- * signal allows, not to the platform's midpoint. */
-const PLATFORM_NOSE_MARGIN_M = 15
-const PLATFORM_NOSE_OFFSET_M = PLATFORM_LENGTH_SCENE_M / 2 - PLATFORM_NOSE_MARGIN_M
-/**
- * Distance (from the relevant stop, approaching or departing) over which the
- * nose offset blends in/out. Keyed on DISTANCE rather than speed: a speed-based
- * blend ties the offset's rate of change to the leg's particular deceleration
- * shape, which is front-loaded near a full stop (speed craters long before
- * distance does) — the offset then does most of its shifting in the last
- * couple of seconds, reading as "hesitates, then darts to the platform edge"
- * rather than a steady glide. Worse, on departure a speed-based unwind
- * regresses outright: right after departure speed is still ~0, so it shrinks
- * hundreds of scene-metres of offset over just a few metres of actual travel
- * — a real backward slide, verified against the sim's own chainageM numbers.
- *
- * A distance-keyed smoothstep fixes both: it grows/shrinks in step with
- * actual position, not with however fast a given leg happens to decelerate.
- * The margin above PLATFORM_NOSE_OFFSET_M keeps the nose's net motion
- * non-negative even at the steepest point of the smoothstep curve (its
- * derivative peaks at 1.5x the linear rate at the midpoint) — 2x leaves the
- * nose visibly still advancing there, not just barely non-decreasing.
- */
-const PLATFORM_EDGE_BLEND_M = PLATFORM_NOSE_OFFSET_M * 2
-
-function edgeBlend(distanceM: number): number {
-  const t = Math.max(0, Math.min(1, distanceM / PLATFORM_EDGE_BLEND_M))
-  return 1 - t * t * (3 - 2 * t) // smoothstep, inverted: 1 at distance 0, 0 past the blend window
-}
 /**
  * Rake-overlap deconfliction for two trains folded onto the same drawn lane
  * (no signalling model keeps them apart in time — see laneFor above). Full
@@ -100,24 +65,6 @@ const LIVERY: Record<ServiceType, { body: Color; stripe: Color }> = {
   ac: { body: new Color('#3a7bd5'), stripe: new Color('#e8eef7') }, // AC local blue
   fast: { body: new Color('#efecf1'), stripe: new Color('#6d1ca3') }, // same stock as slow
   express: { body: new Color('#77302c'), stripe: new Color('#e0b04a') }, // long-distance maroon
-}
-
-/**
- * Drawn lane for a semantic track index within a section. Narrow sections
- * fold expresses onto the fast pair (up direction first, so opposing
- * expresses never share a lane), and the two-track stretch folds everything
- * onto the single up/down pair.
- */
-function laneFor(track: number, sectionTracks: number): number {
-  const isUp = track % 2 === 1 // all *_UP constants are odd by construction
-  if (sectionTracks >= 6) return track
-  if (track === TRACK_EXPRESS_DOWN || track === TRACK_EXPRESS_UP) {
-    // A lone 5th line hosts down expresses; up expresses join the fast pair.
-    if (sectionTracks === 5 && !isUp) return 4
-    track = isUp ? TRACK_FAST_UP : TRACK_FAST_DOWN
-  }
-  if (sectionTracks <= 2) return isUp ? 1 : 0
-  return Math.min(track, sectionTracks - 1)
 }
 
 /**
@@ -251,11 +198,11 @@ export function Fleet({
         // shifts the rake further forward: distance-to-next-stop while
         // approaching, distance-since-last-stop while departing (0 either way
         // while actually dwelling, so both already agree there).
+        // See platformNoseOffsetM — shared with the cab camera, which has to
+        // stand where the rake is actually drawn.
         const nextStopChainageM = stationChainageById.get(state.nextStopId) ?? state.chainageM
-        const approachBlend = edgeBlend(Math.abs(nextStopChainageM - state.chainageM))
-        const departBlend = edgeBlend(state.legDistanceM)
-        const platformBlend = Math.max(approachBlend, departBlend)
-        refOffset = dirSign * PLATFORM_NOSE_OFFSET_M * platformBlend
+        refOffset =
+          dirSign * platformNoseOffsetM(state.chainageM, nextStopChainageM, state.legDistanceM)
       }
       // Extra width/height exaggeration as the camera pulls away, so rakes
       // stay readable over the whole corridor but sit true at station level.

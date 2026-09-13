@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Focus } from './app-data'
+import type { Focus, FollowView } from './app-data'
 
 declare global {
   interface Window {
@@ -18,6 +18,14 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setFocus({ mode: 'free' })
+      if (e.key === 'c' || e.key === 'C') {
+        setFocus((f) => {
+          if (f.mode !== 'follow') return f
+          const order: FollowView[] = ['chase', 'cab', 'lineside']
+          const next = order[(order.indexOf(f.view ?? 'chase') + 1) % order.length]
+          return { ...f, view: next }
+        })
+      }
     }
     window.addEventListener('keydown', onKey)
     // Dev affordance, like window.simClock: drive focus from the console.
@@ -40,7 +48,13 @@ export function App() {
       {focus.mode === 'station' && (
         <StationCard stationId={focus.stationId} onClose={() => setFocus({ mode: 'free' })} />
       )}
-      {focus.mode === 'follow' && <FollowHint trainId={focus.trainId} />}
+      {focus.mode === 'follow' && (
+        <FollowHint
+          trainId={focus.trainId}
+          view={focus.view ?? 'chase'}
+          onView={(view) => setFocus({ mode: 'follow', trainId: focus.trainId, view })}
+        />
+      )}
     </div>
   )
 }

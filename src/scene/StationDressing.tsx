@@ -41,6 +41,14 @@ const BOARD_Y = 150
  */
 const BOARD_FADE_NEAR = 4000
 const BOARD_FADE_FAR = 12000
+/**
+ * Below this the board shrinks with distance instead of holding world size.
+ * It is sized to be read from the station camera's ~2.3 km, so the cab and
+ * lineside views — the first cameras to come within a hundred metres of one —
+ * met a signboard several storeys tall filling half the frame.
+ */
+const BOARD_NEAR_FULL_M = 1400
+const BOARD_MIN_SCALE = 0.06
 /** Sample points along a platform's length — enough to read as following the
  * local track curve on a bend (e.g. Bandra, Dadar) without a visible facet. */
 const PLATFORM_STEPS = 6
@@ -281,7 +289,8 @@ export function StationDressing({
       if (!board) continue
       const dist = camera.position.distanceTo(boardPoints[i])
       const t = (BOARD_FADE_FAR - dist) / (BOARD_FADE_FAR - BOARD_FADE_NEAR)
-      board.scale.setScalar(Math.min(1, Math.max(0, t)))
+      const near = Math.max(BOARD_MIN_SCALE, Math.min(1, dist / BOARD_NEAR_FULL_M))
+      board.scale.setScalar(Math.min(1, Math.max(0, t)) * near)
     }
   })
 

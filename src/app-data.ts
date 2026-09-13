@@ -34,7 +34,14 @@ const syntheticExpresses: Timetable[] = syntheticScheduler(network)
 
 export const timetables: Timetable[] = [...realTimetables, ...syntheticExpresses]
 
+/**
+ * How the camera rides a followed service. Chase keeps the whole rake in
+ * frame; cab sits at the driver's eye on the rake's own lane; lineside plants
+ * the camera by the track ahead and lets the train come past it.
+ */
+export type FollowView = 'chase' | 'cab' | 'lineside'
+
 export type Focus =
   | { mode: 'free' }
-  | { mode: 'follow'; trainId: string }
+  | { mode: 'follow'; trainId: string; view?: FollowView }
   | { mode: 'station'; stationId: string }
