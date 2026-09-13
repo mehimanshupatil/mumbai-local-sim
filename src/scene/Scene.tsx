@@ -20,6 +20,15 @@ import { Wayside } from './Wayside'
 import { Yards } from './Yards'
 
 const FOV_DEG = 45
+/**
+ * Landing camera, as fractions of the framing distance: oblique rather than
+ * top-down, because a near-vertical framing reads as a paper map and flattens
+ * 124 km of corridor into a line.
+ */
+const LANDING_UP = 0.42
+const LANDING_SOUTH = 0.5
+/** Slack past the landing framing before the zoom-out stops. */
+const MAX_ZOOM_OUT = 1.2
 
 export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) => void }) {
   const projection = useMemo(() => createProjection(network), [])
@@ -47,6 +56,11 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
   // camera fov, with margin for the camera tilt foreshortening the near end.
   const extent = Math.max(maxX - minX, maxZ - minZ)
   const distance = (1.3 * extent) / (2 * Math.tan((FOV_DEG / 2) * (Math.PI / 180)))
+  // How far the landing camera actually sits from what it looks at. Zooming
+  // out is capped just past this: the whole line is already in frame here, so
+  // anything further only shrinks the subject and pulls in terrain the line
+  // has nothing to do with.
+  const landingDistance = distance * Math.hypot(LANDING_UP, LANDING_SOUTH)
 
   return (
     <Canvas
@@ -57,10 +71,9 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       // costs half the frame rate); coarse-pointer devices clamp lower.
       {...(IS_COARSE_POINTER ? { dpr: [1, 1.5] as [number, number] } : {})}
       camera={{
-        // Oblique, not top-down: a near-vertical framing reads as a paper map
-        // and flattens 124 km of corridor into a line. From here the line
-        // recedes toward a hazed horizon with sky above it (see Atmosphere).
-        position: [cx, distance * 0.42, cz + distance * 0.5],
+        // See LANDING_UP/LANDING_SOUTH — from here the line recedes toward a
+        // hazed horizon with sky above it (see Atmosphere).
+        position: [cx, distance * LANDING_UP, cz + distance * LANDING_SOUTH],
         fov: FOV_DEG,
         near: 50,
         far: distance * 6,
@@ -147,7 +160,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
         target={[cx, 0, cz]}
         maxPolarAngle={Math.PI / 2.3}
         minDistance={150}
-        maxDistance={distance * 2}
+        maxDistance={landingDistance * MAX_ZOOM_OUT}
         enableDamping
         zoomToCursor
         screenSpacePanning={false}
