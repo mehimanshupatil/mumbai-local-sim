@@ -13,14 +13,14 @@ import type { Projection } from './projection'
 import {
   buildYardRoadTracks,
   COACHES,
-  laneLateralAtChainage,
+  trackLateralAtChainage,
   NOSE_L,
   PARKED_RAKE_CHAINAGE_M,
   platformNoseOffsetM,
   RAKE_LEN,
   roadForSlot,
 } from './rake-geometry'
-import { laneAtChainage } from '../sim/lanes'
+import { trackForLineAt } from '../sim/lines'
 import { simClock } from './sim-clock'
 import { buildTrainTrack, poseAt, type TrainTrack } from './track-geometry'
 
@@ -130,7 +130,7 @@ export function Fleet({
           ? 0
           : platformNoseOffsetM(state.chainageM, nextStopChainageM, state.legDistanceM),
         refOffset: 0,
-        lateral: parked ? 0 : laneLateralAtChainage(sections, state.track, state.chainageM),
+        lateral: parked ? 0 : trackLateralAtChainage(sections, state.lineId, state.chainageM),
       }
     })
 
@@ -143,7 +143,7 @@ export function Fleet({
     const lines = new Map<string, typeof rakes>()
     for (const r of rakes) {
       if (r.state.parkedYardId !== null) continue
-      const key = `${laneAtChainage(sections, r.state.track, r.state.chainageM)}:${r.state.direction}`
+      const key = `${trackForLineAt(sections, r.state.lineId, r.state.chainageM)}:${r.state.direction}`
       const line = lines.get(key)
       if (line) line.push(r)
       else lines.set(key, [r])
@@ -167,7 +167,7 @@ export function Fleet({
       if (n >= MAX_RAKES * COACHES) break
       const livery = LIVERY[state.serviceType]
       // Parked rakes (ticket #17) pose on their own yard siding instead of
-      // the corridor: a fixed nose-to-tail slot, no platform/lane geometry.
+      // the Route: a fixed nose-to-tail slot, no platform or Track geometry.
       const roads = state.parkedYardId ? yardRoads.get(state.parkedYardId) : undefined
       const yardTrack = roads ? roadForSlot(roads, state.parkedSlot) : undefined
       const track: TrainTrack = yardTrack ?? centerTrack
@@ -224,7 +224,7 @@ export function Fleet({
         // drawn straight through one another.
         const coachLateral = yardTrack
           ? lateral
-          : laneLateralAtChainage(sections, state.track, trackChainageM + alongOffset / track.scale)
+          : trackLateralAtChainage(sections, state.lineId, trackChainageM + alongOffset / track.scale)
         const px = pose.x + nx * coachLateral
         const pz = pose.z + nz * coachLateral
         dummy.position.set(px, heightfield.railY(px, pz) + (BODY_H * bulk) / 2, pz)

@@ -6,12 +6,12 @@
 import type { NetworkData, StationRecord } from '../data/network-types'
 import { buildTimetable } from './simulate'
 import {
-  TRACK_EXPRESS_DOWN,
-  TRACK_EXPRESS_UP,
-  TRACK_FAST_DOWN,
-  TRACK_FAST_UP,
-  TRACK_SLOW_DOWN,
-  TRACK_SLOW_UP,
+  LINE_THROUGH_DOWN,
+  LINE_THROUGH_UP,
+  LINE_FAST_DOWN,
+  LINE_FAST_UP,
+  LINE_SLOW_DOWN,
+  LINE_SLOW_UP,
   type ServiceDef,
 } from './types'
 
@@ -90,7 +90,7 @@ export const syntheticScheduler: Scheduler = (network) => {
         id: 'probe',
         serviceType: 'slow',
         direction: 'down',
-        track: 0,
+        lineId: 0,
         departureTime: 0,
         stopIds,
       })
@@ -108,16 +108,16 @@ export const syntheticScheduler: Scheduler = (network) => {
   const pair = (
     idPrefix: string,
     i: number,
-    template: Omit<ServiceDef, 'id' | 'direction' | 'track'> & { downTrack: number; upTrack: number },
+    template: Omit<ServiceDef, 'id' | 'direction' | 'lineId'> & { downLine: number; upLine: number },
   ) => {
-    const { downTrack, upTrack, stopIds, departureTime, ...rest } = template
+    const { downLine, upLine, stopIds, departureTime, ...rest } = template
     defs.push(
-      { ...rest, id: `${idPrefix}-DN-${i}`, direction: 'down', track: downTrack, departureTime, stopIds },
+      { ...rest, id: `${idPrefix}-DN-${i}`, direction: 'down', lineId: downLine, departureTime, stopIds },
       {
         ...rest,
         id: `${idPrefix}-UP-${i}`,
         direction: 'up',
-        track: upTrack,
+        lineId: upLine,
         departureTime: departureTime - runSeconds(stopIds),
         stopIds: [...stopIds].reverse(),
       },
@@ -132,16 +132,16 @@ export const syntheticScheduler: Scheduler = (network) => {
       serviceType: slowType,
       departureTime,
       stopIds: slowStopsTo(SLOW_TERMINI[i % SLOW_TERMINI.length]),
-      downTrack: TRACK_SLOW_DOWN,
-      upTrack: TRACK_SLOW_UP,
+      downLine: LINE_SLOW_DOWN,
+      upLine: LINE_SLOW_UP,
     })
     // Fast departures interleave the slows: half a headway behind.
     pair('F', i, {
       serviceType: 'fast',
       departureTime: departureTime + headwayAt(departureTime) / 2,
       stopIds: fastStopsTo(FAST_TERMINI[i % FAST_TERMINI.length]),
-      downTrack: TRACK_FAST_DOWN,
-      upTrack: TRACK_FAST_UP,
+      downLine: LINE_FAST_DOWN,
+      upLine: LINE_FAST_UP,
     })
   })
 
@@ -150,8 +150,8 @@ export const syntheticScheduler: Scheduler = (network) => {
       serviceType: 'slow',
       departureTime: t,
       stopIds: shuttleStops,
-      downTrack: TRACK_SLOW_DOWN,
-      upTrack: TRACK_SLOW_UP,
+      downLine: LINE_SLOW_DOWN,
+      upLine: LINE_SLOW_UP,
     })
   }
 
@@ -161,8 +161,8 @@ export const syntheticScheduler: Scheduler = (network) => {
       departureTime: t,
       stopIds: expressStops,
       dwellS: 0,
-      downTrack: TRACK_EXPRESS_DOWN,
-      upTrack: TRACK_EXPRESS_UP,
+      downLine: LINE_THROUGH_DOWN,
+      upLine: LINE_THROUGH_UP,
     })
   }
 

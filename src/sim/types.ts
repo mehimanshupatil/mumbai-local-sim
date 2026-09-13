@@ -11,22 +11,24 @@ export type ServiceType = 'slow' | 'fast' | 'ac' | 'express'
 export type Direction = 'up' | 'down'
 
 /**
- * Semantic running-track indices, shared by every scheduler implementation.
- * The render layer maps them onto however many tracks a section actually has.
+ * The Lines a Service can be booked on — Slow / Fast / Through by Up / Down,
+ * real WR usage. Shared by every scheduler implementation. How many physical
+ * Tracks a Section has decides which Track a Line is drawn on there; that
+ * mapping is trackForLine (src/sim/lines.ts), not this.
  */
-export const TRACK_SLOW_DOWN = 0
-export const TRACK_SLOW_UP = 1
-export const TRACK_FAST_DOWN = 2
-export const TRACK_FAST_UP = 3
-export const TRACK_EXPRESS_DOWN = 4
-export const TRACK_EXPRESS_UP = 5
+export const LINE_SLOW_DOWN = 0
+export const LINE_SLOW_UP = 1
+export const LINE_FAST_DOWN = 2
+export const LINE_FAST_UP = 3
+export const LINE_THROUGH_DOWN = 4
+export const LINE_THROUGH_UP = 5
 
 export interface TrainState {
   id: string
   serviceType: ServiceType
   direction: Direction
-  /** 0-based running-track index within the section the train is on. */
-  track: number
+  /** The Line this Service is booked on — one of the LINE_* constants. */
+  lineId: number
   /** Position along the corridor, metres from Churchgate. */
   chainageM: number
   /** Stopped at a station with doors open. */
@@ -59,7 +61,8 @@ export interface ServiceDef {
   id: string
   serviceType: ServiceType
   direction: Direction
-  track: number
+  /** The Line this Service is booked on — one of the LINE_* constants. */
+  lineId: number
   /** Departure from the first stop. */
   departureTime: SimTime
   /** Ordered station ids the service halts at. */

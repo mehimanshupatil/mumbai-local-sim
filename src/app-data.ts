@@ -15,7 +15,7 @@ interface RealServiceJson {
   id: string
   serviceType: ServiceType
   direction: 'up' | 'down'
-  track: number
+  lineId: number
   stops: { stationId: string; t: number }[]
 }
 
@@ -36,7 +36,7 @@ export const timetables: Timetable[] = [...realTimetables, ...syntheticExpresses
 
 /**
  * How the camera rides a followed service. Chase keeps the whole rake in
- * frame; cab sits at the driver's eye on the rake's own lane; lineside plants
+ * frame; cab sits at the driver's eye on the Rake's own Track; lineside plants
  * the camera by the track ahead and lets the train come past it.
  */
 export type FollowView = 'chase' | 'cab' | 'lineside'

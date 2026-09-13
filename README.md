@@ -1,6 +1,6 @@
 # Mumbai Local
 
-A real-time 3D simulation of the Mumbai suburban railway — Western line v1,
+A real-time 3D simulation of the Mumbai suburban railway — Western Route v1,
 Churchgate → Dahanu Road — running the real Western Railway timetable over
 real geography.
 
@@ -14,8 +14,8 @@ real geography.
   over a real terrain heightfield — the Arabian Sea, Mahim bay, the Vasai
   creek crossing, and the Sahyadri foothills are where they belong.
 - Every slow, fast, and AC local runs on the actual Western Railway Public
-  Time Table (1,321 real services, baked from the official PTT PDFs — see
-  Data baking below), not a synthetic approximation: real departure times,
+  Time Table (1,358 real Services — 837 slow, 374 fast, 147 AC — baked from
+  the official PTT PDFs, see Data baking below), not a synthetic approximation: real departure times,
   real turnback termini, real skip-stop variations. Long-distance expresses
   are the one synthetic layer left, since suburban PTTs don't carry mainline
   mail/express timings. Fast locals genuinely overtake slows — it emerges
@@ -80,6 +80,6 @@ datasets, not new code. See `CLAUDE.md` for conventions.
 
 - Track/station data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL)
 - Terrain: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (terrarium)
-- Timetable: Western Railway Public Time Tables, W.E.F. 01.05.2026 (`data/timetable/`)
+- Timetable: Western Railway Public Time Tables, PTT 79, W.E.F. 01.09.2026 (`data/timetable/`)
 - Fonts: Noto Sans / Noto Sans Devanagari ([OFL](public/fonts/OFL.txt))
 - Station metadata for kinematics calibration: `data/` (third-party, reference only)

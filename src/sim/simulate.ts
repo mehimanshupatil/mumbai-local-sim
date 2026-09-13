@@ -70,7 +70,8 @@ interface TrainIdentity {
   id: string
   serviceType: ServiceType
   direction: Direction
-  track: number
+  /** The Line this Service is booked on — see src/sim/types.ts LINE_*. */
+  lineId: number
   /** Real yard nearest this service's terminating station, for parking once
    * the run ends (ticket #17); null if no yard is within a sane distance. */
   homeYardId: string | null
@@ -118,7 +119,7 @@ export function buildTimetable(network: NetworkData, def: ServiceDef): Timetable
     id: def.id,
     serviceType: def.serviceType,
     direction: def.direction,
-    track: def.track,
+    lineId: def.lineId,
     homeYardId: nearestYardId(network, def.stopIds[def.stopIds.length - 1]),
     originYardId: nearestYardId(network, def.stopIds[0]),
   }
@@ -223,7 +224,7 @@ function stateOf(tt: Timetable, simTime: SimTime): TrainState | null {
     id: def.id,
     serviceType: def.serviceType,
     direction: def.direction,
-    track: def.track,
+    lineId: def.lineId,
   }
   if (simTime < stops[0].arriveT) {
     if (!def.originYardId || simTime < stops[0].arriveT - PARK_DURATION_S) return null

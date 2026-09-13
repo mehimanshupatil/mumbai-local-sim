@@ -50,7 +50,8 @@ export interface RealService {
   id: string
   serviceType: ServiceType
   direction: Direction
-  track: number
+  /** The Line this Service is booked on — see src/sim/types.ts LINE_*. */
+  lineId: number
   cars: number | null
   stops: RealStop[]
 }
@@ -177,13 +178,13 @@ const MINUTE_S = 60
 function deRoundWithinMinute(services: RealService[]): void {
   /** Times already claimed, by line, station and published minute. */
   const claimed = new Map<string, number[]>()
-  const key = (track: number, stationId: string, t: number) =>
-    `${track}:${stationId}:${Math.floor(t / MINUTE_S)}`
-  const neighbours = (track: number, stationId: string, t: number) => {
+  const key = (lineId: number, stationId: string, t: number) =>
+    `${lineId}:${stationId}:${Math.floor(t / MINUTE_S)}`
+  const neighbours = (lineId: number, stationId: string, t: number) => {
     const minute = Math.floor(t / MINUTE_S)
     const out: number[] = []
     for (const m of [minute - 1, minute, minute + 1]) {
-      const held = claimed.get(`${track}:${stationId}:${m}`)
+      const held = claimed.get(`${lineId}:${stationId}:${m}`)
       if (held) out.push(...held)
     }
     return out
@@ -194,7 +195,7 @@ function deRoundWithinMinute(services: RealService[]): void {
     for (let offset = 0; offset < MINUTE_S; offset++) {
       let gap = Infinity
       for (const stop of svc.stops) {
-        for (const other of neighbours(svc.track, stop.stationId, stop.t)) {
+        for (const other of neighbours(svc.lineId, stop.stationId, stop.t)) {
           gap = Math.min(gap, Math.abs(stop.t + offset - other))
         }
       }
@@ -206,7 +207,7 @@ function deRoundWithinMinute(services: RealService[]): void {
     }
     for (const stop of svc.stops) {
       stop.t += bestOffset
-      const k = key(svc.track, stop.stationId, stop.t)
+      const k = key(svc.lineId, stop.stationId, stop.t)
       const held = claimed.get(k)
       if (held) held.push(stop.t)
       else claimed.set(k, [stop.t])
@@ -223,9 +224,9 @@ function deRoundWithinMinute(services: RealService[]): void {
 function countOvertakingPairs(services: RealService[]): number {
   const byLine = new Map<number, RealService[]>()
   for (const svc of services) {
-    const line = byLine.get(svc.track)
+    const line = byLine.get(svc.lineId)
     if (line) line.push(svc)
-    else byLine.set(svc.track, [svc])
+    else byLine.set(svc.lineId, [svc])
   }
   let overtakes = 0
   for (const line of byLine.values()) {
@@ -284,16 +285,16 @@ function isFastPattern(run: RawStop[]): boolean {
 }
 
 function classifyServiceType(run: RawStop[], isAc: boolean): ServiceType {
-  if (isAc) return 'ac' // a livery, not a calling pattern — see trackFor
+  if (isAc) return 'ac' // a livery, not a calling pattern — see lineFor
   return isFastPattern(run) ? 'fast' : 'slow'
 }
 
-// Semantic track lanes, matching src/sim/types.ts (kept independent — this
-// bake script must stay decoupled from the synthetic scheduler module).
-const TRACK_SLOW_DOWN = 0
-const TRACK_SLOW_UP = 1
-const TRACK_FAST_DOWN = 2
-const TRACK_FAST_UP = 3
+// The Lines, matching src/sim/types.ts (kept independent — this bake script
+// must stay decoupled from the synthetic scheduler module).
+const LINE_SLOW_DOWN = 0
+const LINE_SLOW_UP = 1
+const LINE_FAST_DOWN = 2
+const LINE_FAST_UP = 3
 
 /**
  * Which pair of lines a service runs on. Taken from the calling pattern, not
@@ -303,10 +304,10 @@ const TRACK_FAST_UP = 3
  * a classified fast, which then sat on the same rails as the stopping trains
  * they are timetabled to overtake.
  */
-function trackFor(serviceType: ServiceType, direction: Direction, run: RawStop[]): number {
+function lineFor(serviceType: ServiceType, direction: Direction, run: RawStop[]): number {
   const fast = serviceType === 'fast' || isFastPattern(run)
-  if (direction === 'down') return fast ? TRACK_FAST_DOWN : TRACK_SLOW_DOWN
-  return fast ? TRACK_FAST_UP : TRACK_SLOW_UP
+  if (direction === 'down') return fast ? LINE_FAST_DOWN : LINE_SLOW_DOWN
+  return fast ? LINE_FAST_UP : LINE_SLOW_UP
 }
 
 /**
@@ -373,7 +374,7 @@ function main() {
         id: rawRuns.length > 1 ? `${train.trainNumber}-${i}` : train.trainNumber,
         serviceType,
         direction,
-        track: trackFor(serviceType, direction, repaired),
+        lineId: lineFor(serviceType, direction, repaired),
         cars: train.cars,
         // Sub-minute offsets are applied once every service is in (see
         // deRoundWithinMinute) — it needs to see them all to place them apart.
@@ -465,7 +466,7 @@ function main() {
     OUT_PATH,
     JSON.stringify(
       {
-        source: 'Western Railway Public Time Tables, W.E.F. 01.05.2026',
+        source: 'Western Railway Public Time Tables, PTT 79, W.E.F. 01.09.2026',
         bakedAt: new Date().toISOString().slice(0, 10),
         services,
       },

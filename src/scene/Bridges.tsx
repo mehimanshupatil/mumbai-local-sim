@@ -4,7 +4,7 @@ import { trackRibbonGeometry } from './Corridor'
 import { TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { sectionAtChainage } from '../sim/lanes'
+import { sectionAtChainage } from '../sim/lines'
 import { buildTrainTrack, poseAt } from './track-geometry'
 
 /**

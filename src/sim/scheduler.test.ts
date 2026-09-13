@@ -4,10 +4,10 @@ import type { NetworkData } from '../data/network-types'
 import { syntheticScheduler } from './scheduler'
 import { buildTimetable, trainStates } from './simulate'
 import {
-  TRACK_FAST_DOWN,
-  TRACK_FAST_UP,
-  TRACK_SLOW_DOWN,
-  TRACK_SLOW_UP,
+  LINE_FAST_DOWN,
+  LINE_FAST_UP,
+  LINE_SLOW_DOWN,
+  LINE_SLOW_UP,
   type ServiceDef,
 } from './types'
 
@@ -89,13 +89,13 @@ describe('synthetic scheduler', () => {
   })
 
   it('keeps slow and fast services on disjoint tracks', () => {
-    const slowTracks = new Set(slowDown.map((d) => d.track))
+    const slowTracks = new Set(slowDown.map((d) => d.lineId))
     for (const d of defs.filter((x) => x.serviceType === 'slow' || x.serviceType === 'ac')) {
-      expect([TRACK_SLOW_DOWN, TRACK_SLOW_UP]).toContain(d.track)
+      expect([LINE_SLOW_DOWN, LINE_SLOW_UP]).toContain(d.lineId)
     }
     for (const d of defs.filter((x) => x.serviceType === 'fast')) {
-      expect([TRACK_FAST_DOWN, TRACK_FAST_UP]).toContain(d.track)
-      expect(slowTracks.has(d.track)).toBe(false)
+      expect([LINE_FAST_DOWN, LINE_FAST_UP]).toContain(d.lineId)
+      expect(slowTracks.has(d.lineId)).toBe(false)
     }
   })
 

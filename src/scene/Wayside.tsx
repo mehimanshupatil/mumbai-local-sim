@@ -4,7 +4,7 @@ import type { NetworkData } from '../data/network-types'
 import { PLATFORM_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { sectionAtChainage } from '../sim/lanes'
+import { sectionAtChainage } from '../sim/lines'
 import { buildTrainTrack, poseAt } from './track-geometry'
 
 /**

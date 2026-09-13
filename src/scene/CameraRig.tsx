@@ -8,7 +8,7 @@ import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import {
   buildYardRoadTracks,
-  laneLateralAtChainage,
+  trackLateralAtChainage,
   NOSE_L,
   PARKED_RAKE_CHAINAGE_M,
   platformNoseOffsetM,
@@ -132,12 +132,12 @@ export function CameraRig({
       const y = heightfield.railY(pose.x, pose.z)
       // Chase from behind the direction of travel.
       const dirSign = yardTrack ? 1 : state.direction === 'down' ? 1 : -1
-      // The rake is drawn on its own lane, not the centreline the chase cam
+      // The Rake is drawn on its own Track, not the centreline the chase cam
       // targets — a cab or lineside camera has to use the same offset or it
       // sits between tracks (see Fleet's lateral).
       const lateral = yardTrack
         ? 0
-        : laneLateralAtChainage(network.sections, state.track, state.chainageM)
+        : trackLateralAtChainage(network.sections, state.lineId, state.chainageM)
       const offsetOf = (p: { x: number; z: number; angleRad: number }, m: number) => ({
         x: p.x + -Math.cos(p.angleRad) * m,
         z: p.z + Math.sin(p.angleRad) * m,

@@ -1,13 +1,23 @@
 # mumbai-local-sim
 
-3D simulation of the Mumbai local (Western line v1), React + react-three-fiber + TypeScript strict + pnpm. Spec is GitHub issue #1; work is ticketed in issues #2–12, one commit per ticket on main with `Closes #N`.
+3D simulation of the Mumbai local (Western Route v1), React + react-three-fiber + TypeScript strict + pnpm. Spec is GitHub issue #1; work is ticketed in issues #2–12, one commit per ticket on main with `Closes #N`.
+
+## Vocabulary
+
+`CONTEXT.md` pins the terms; the short version, because one word used to do
+three jobs here: a **Route** is a whole corridor arriving as one baked dataset
+(Western, Central, Harbour). A **Line** is what a Service is booked on — Slow /
+Fast / Through by Up / Down, real WR usage, `LINE_*` in `src/sim/types.ts`. A
+**Track** is one physical pair of rails, counted per Section and drawn as one
+polyline; `trackForLine` (`src/sim/lines.ts`) says which Track a Line runs on
+where a Section has fewer Tracks than Lines. "lane" is not a word here.
 
 ## Architecture (spec-mandated seams)
 
 - `src/sim/` — pure simulation core: `(network, services, simTime) → TrainState[]`. **No React or three.js imports here, ever.** Deterministic: same inputs, same output.
 - `src/data/` — baked network JSON (`western.json`) + line-agnostic types. True-scale WGS84/chainage data; visual exaggeration happens only at render time (`src/scene/config.ts`).
 - `src/scene/` — rendering layer; consumes sim output. The train visual is a swappable component.
-- Future lines (Central, Harbour, Metro) must arrive as new baked datasets, not new code paths.
+- Future Routes (Central, Harbour, Metro) must arrive as new baked datasets, not new code paths.
 
 ## Testing (two seams only)
 
@@ -24,7 +34,7 @@
 ## Quirks
 
 - pnpm 11: build-script approvals live in `pnpm-workspace.yaml` (`allowBuilds`), not package.json.
-- Track counts genuinely differ per section (4 / 5–6 / 4 / 2 along the corridor); two 4-track gaps inside Mumbai Central–Borivali are real (Harbour line is a separate excluded service; 6th line under construction) and are pinned by tests — don't "fix" them.
+- Track counts genuinely differ per section (4 / 5–6 / 4 / 2 along the corridor); two 4-Track gaps inside Mumbai Central–Borivali are real (the Harbour Route is a separate excluded service; a 6th Track is under construction) and are pinned by tests — don't "fix" them.
 - Real WR fast trains run several distinct calling patterns, not the one idealized skip-list the v1 spec assumed (confirmed baking `western-real-timetable.json`: only ~37% of real fast services match that exact pattern south of Borivali). What holds universally is that every major interchange stays served — see `src/data/western-real-timetable.test.ts`.
 
 ## Agent skills

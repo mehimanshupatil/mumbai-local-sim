@@ -17,7 +17,7 @@ import { IS_COARSE_POINTER, PLATFORM_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } fro
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import { buildYardRoadTracks } from './rake-geometry'
-import { sectionAtChainage } from '../sim/lanes'
+import { sectionAtChainage } from '../sim/lines'
 import {
   buildTrainTrack,
   corridorSampleStations,

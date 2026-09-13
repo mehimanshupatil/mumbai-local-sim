@@ -15,7 +15,7 @@ const slowLocal: ServiceDef = {
   id: 'CCG-VR-1',
   serviceType: 'slow',
   direction: 'down',
-  track: 0,
+  lineId: 0,
   departureTime: DEPART,
   stopIds,
 }
@@ -128,7 +128,7 @@ describe('one slow local Churchgate → Virar', () => {
     expect(mid.id).toBe('CCG-VR-1')
     expect(mid.serviceType).toBe('slow')
     expect(mid.direction).toBe('down')
-    expect(mid.track).toBe(0)
+    expect(mid.lineId).toBe(0)
   })
 
   it('replays deterministically — same time, same state', () => {

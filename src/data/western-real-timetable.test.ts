@@ -11,7 +11,7 @@ const timetable = realTimetableJson as {
     id: string
     serviceType: string
     direction: string
-    track: number
+    lineId: number
     cars: number | null
     stops: { stationId: string; t: number }[]
   }[]
@@ -78,7 +78,7 @@ describe('baked real timetable (WR Public Time Tables)', () => {
     const events = new Map<string, { id: string; t: number }[]>()
     for (const svc of timetable.services) {
       for (const stop of svc.stops) {
-        const key = `${svc.track}:${stop.stationId}`
+        const key = `${svc.lineId}:${stop.stationId}`
         const list = events.get(key)
         if (list) list.push({ id: svc.id, t: stop.t })
         else events.set(key, [{ id: svc.id, t: stop.t }])
@@ -138,26 +138,26 @@ describe('baked real timetable (WR Public Time Tables)', () => {
   })
 
   // West to east the corridor runs slow-down, slow-up, fast-down, fast-up,
-  // then the express pair (see src/sim/types.ts and laneFor). Which pair a
+  // then the express pair (see src/sim/types.ts and trackForLine). Which pair a
   // service belongs on follows its calling pattern, not its livery: 'ac' is a
   // livery, and a real WR AC local runs both fast and slow workings.
   it('puts every service on the pair of lines its calling pattern belongs to', () => {
     for (const svc of timetable.services) {
       if (svc.serviceType === 'express') {
-        expect([4, 5], svc.id).toContain(svc.track)
+        expect([4, 5], svc.id).toContain(svc.lineId)
         continue
       }
       const skipped = skippedStations(svc.stops)
-      const onFastPair = svc.track === 2 || svc.track === 3
+      const onFastPair = svc.lineId === 2 || svc.lineId === 3
       expect(onFastPair, `${svc.id} (${svc.serviceType}, skips ${skipped})`).toBe(
         skipped > FAST_SKIP_THRESHOLD,
       )
     }
   })
 
-  it('matches the down track direction to its track lane', () => {
+  it('matches the down direction to its Line', () => {
     for (const svc of timetable.services) {
-      const downTrack = svc.track % 2 === 0
+      const downTrack = svc.lineId % 2 === 0
       expect(downTrack, svc.id).toBe(svc.direction === 'down')
     }
   })
@@ -198,8 +198,8 @@ describe('baked real timetable (WR Public Time Tables)', () => {
 
   it('runs AC services as both fast and slow workings, as the real ones do', () => {
     const ac = timetable.services.filter((s) => s.serviceType === 'ac')
-    const onFast = ac.filter((s) => s.track === 2 || s.track === 3)
-    const onSlow = ac.filter((s) => s.track === 0 || s.track === 1)
+    const onFast = ac.filter((s) => s.lineId === 2 || s.lineId === 3)
+    const onSlow = ac.filter((s) => s.lineId === 0 || s.lineId === 1)
     expect(ac.length).toBeGreaterThan(100)
     expect(onFast.length).toBeGreaterThan(20)
     expect(onSlow.length).toBeGreaterThan(20)

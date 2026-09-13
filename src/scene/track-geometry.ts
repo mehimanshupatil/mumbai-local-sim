@@ -4,7 +4,7 @@
  * Pure geometry — no three.js or React.
  */
 import type { NetworkData, TrackSection, YardRecord } from '../data/network-types'
-import { sectionAtChainage } from '../sim/lanes'
+import { sectionAtChainage } from '../sim/lines'
 import type { Projection } from './projection'
 
 export interface TrackPolyline {
@@ -55,8 +55,8 @@ function pointAt(points: [number, number][], lengths: number[], m: number): [num
  * Taken from the corridor rather than from a finite difference over whatever
  * vertex list a caller happens to hold: a section's own list is clipped at
  * its boundaries, so the two sides of a boundary derived *different* normals
- * from the same point, and lanes that are supposed to meet there missed each
- * other by up to 4 m on a curve. Averaging also keeps a lane from inheriting
+ * from the same point, and Tracks that are supposed to meet there missed each
+ * other by up to 4 m on a curve. Averaging also keeps a Track from inheriting
  * the full kink of every native corridor vertex.
  */
 const NORMAL_WINDOW_M = 25
@@ -138,7 +138,7 @@ export interface YardRoadOptions {
   roads: number
   /** Centre-to-centre gap between roads — the running lines' own spacing. */
   spacingM: number
-  /** Clear strip between the outermost running lane and the first road. */
+  /** Clear strip between the outermost running Track and the first road. */
   clearanceM: number
   /** Length of the throat each road peels off the running lines along. */
   throatM: number
@@ -179,8 +179,8 @@ export function buildYardRoads(
   const dirSign = far.alongM >= near.alongM ? 1 : -1
   const side = near.lateralM >= 0 ? 1 : -1
   const tracksHere = sectionAtChainage(sections, near.alongM / corridor.scale).tracks
-  const outerLaneM = ((tracksHere - 1) / 2) * opts.spacingM
-  const firstRoadM = Math.max(Math.abs(near.lateralM), outerLaneM + opts.clearanceM)
+  const outerTrackM = ((tracksHere - 1) / 2) * opts.spacingM
+  const firstRoadM = Math.max(Math.abs(near.lateralM), outerTrackM + opts.clearanceM)
   const totalM = opts.throatM + opts.roadM
   const step = opts.stepM ?? 25
   const roads: TrainTrack[] = []
@@ -193,7 +193,7 @@ export function buildYardRoads(
       const nz = Math.sin(pose.angleRad)
       // Eased across the throat so a road diverges as a curve off the
       // running lines, the same shape as a section boundary's turnout.
-      const lateral = side * (outerLaneM + smoothstep(s / opts.throatM) * (targetM - outerLaneM))
+      const lateral = side * (outerTrackM + smoothstep(s / opts.throatM) * (targetM - outerTrackM))
       points.push([pose.x + nx * lateral, pose.z + nz * lateral])
       if (s >= totalM) break
     }
@@ -462,7 +462,7 @@ export function corridorSampleStations(network: NetworkData, track: TrainTrack):
  * projection's distortion (<0.1% over this corridor).
  *
  * At a section boundary where the track count changes, tracks don't just
- * snap to the new lane offset (see matchBoundary above): a track carried
+ * snap to the new Track offset (see matchBoundary above): a Track carried
  * through from the neighbouring section eases from its old offset to its
  * new one over a symmetric window straddling the boundary, and a track that
  * only exists on one side tapers to/from the centreline within that
