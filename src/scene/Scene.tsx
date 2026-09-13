@@ -7,6 +7,7 @@ import { Bridges } from './Bridges'
 import { CameraRig, type ControlsLike } from './CameraRig'
 import { IS_COARSE_POINTER } from './config'
 import { Corridor } from './Corridor'
+import { Effects } from './Effects'
 import { useSimDaylight } from './daylight'
 import { Fleet } from './Fleet'
 import { loadHeightfield, type Heightfield } from './heightfield'
@@ -124,6 +125,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
             night={daylight.night}
             onSelectTrain={(trainId) => onFocus({ mode: 'follow', trainId })}
           />
+          <Effects daylight={daylight} />
           <CameraRig
             focus={focus}
             onFocus={onFocus}
