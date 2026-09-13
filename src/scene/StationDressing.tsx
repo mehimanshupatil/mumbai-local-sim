@@ -16,7 +16,13 @@ import type { NetworkData } from '../data/network-types'
 import { IS_COARSE_POINTER, PLATFORM_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { buildTrainTrack, poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
+import {
+  buildTrainTrack,
+  corridorSampleStations,
+  poseAt,
+  sectionAtChainage,
+  type TrainTrack,
+} from './track-geometry'
 import { WRBoard } from './WRBoard'
 
 const BALLAST_MARGIN_M = 22
@@ -52,39 +58,51 @@ function mulberry32(seed: number) {
   }
 }
 
-/** Ballast bed: a corridor-long ribbon under the tracks, width per section. */
+/**
+ * Ballast bed: a corridor-long ribbon under the tracks, width per section.
+ *
+ * Sampled as a grid, not a two-edge strip. Both dimensions of that grid are
+ * forced by the same rule — the bed only stays under the rails where it
+ * chords no longer a span of terrain than the tracks do:
+ *
+ * - Across: a 6-track section's cross-section is ~194 scene-m wide, and one
+ *   straight chord between its two edges rides above every dip in between,
+ *   swallowing the tracks that follow the ground down (worst case ~4.7
+ *   scene-m, near Mumbai Central).
+ * - Along: the tracks densify to 20 m inside each turnout window (see
+ *   track-geometry), so the bed samples the same stations rather than the
+ *   sparser ~77 m native centreline vertices.
+ */
+const BALLAST_COLUMNS = 8
+
 function ballastGeometry(network: NetworkData, track: TrainTrack, heightfield: Heightfield) {
-  const { points, lengths, scale } = track
+  const { scale } = track
+  const stations = corridorSampleStations(network, track)
   const positions: number[] = []
   const indices: number[] = []
-  for (let i = 0; i < points.length; i++) {
-    const [x, z] = points[i]
-    const prev = points[Math.max(0, i - 1)]
-    const next = points[Math.min(points.length - 1, i + 1)]
-    const dx = next[0] - prev[0]
-    const dz = next[1] - prev[1]
-    const len = Math.hypot(dx, dz) || 1
-    const nx = -dz / len
-    const nz = dx / len
-    const section = sectionAtChainage(network.sections, lengths[i] / scale)
+  const perRow = BALLAST_COLUMNS + 1
+  for (let i = 0; i < stations.length; i++) {
+    const chainageM = stations[i] / scale
+    const pose = poseAt(track, chainageM)
+    // Same normal convention as platformGeometry below: +lateral is the
+    // side a +offset platform sits on.
+    const nx = -Math.cos(pose.angleRad)
+    const nz = Math.sin(pose.angleRad)
+    const section = sectionAtChainage(network.sections, chainageM)
     const half = (section.tracks * TRACK_SPACING_SCENE_M) / 2 + BALLAST_MARGIN_M
-    // Sample height at each edge independently — a 6-track section's edges
-    // sit up to ~97 scene-m either side of the centerline, and terrain
-    // slope over that span means the centerline's height doesn't apply
-    // across the whole cross-section. Using one flat height for both edges
-    // is what caused the bed to visibly part company with the rails on
-    // sloped ground.
-    const rightX = x + nx * half
-    const rightZ = z + nz * half
-    const leftX = x - nx * half
-    const leftZ = z - nz * half
-    const rightY = heightfield.railY(rightX, rightZ) - 0.8
-    const leftY = heightfield.railY(leftX, leftZ) - 0.8
-    positions.push(rightX, rightY, rightZ, leftX, leftY, leftZ)
+    for (let c = 0; c <= BALLAST_COLUMNS; c++) {
+      const lateral = -half + (2 * half * c) / BALLAST_COLUMNS
+      const px = pose.x + nx * lateral
+      const pz = pose.z + nz * lateral
+      positions.push(px, heightfield.railY(px, pz) - 0.8, pz)
+    }
     if (i > 0) {
       // Wound counter-clockwise seen from above (+y) so the bed isn't culled.
-      const a = (i - 1) * 2
-      indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3)
+      const a = (i - 1) * perRow
+      const b = i * perRow
+      for (let c = 0; c < BALLAST_COLUMNS; c++) {
+        indices.push(a + c + 1, b + c + 1, a + c, a + c, b + c + 1, b + c)
+      }
     }
   }
   const geo = new BufferGeometry()

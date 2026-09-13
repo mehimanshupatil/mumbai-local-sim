@@ -47,19 +47,6 @@ function pointAt(points: [number, number][], lengths: number[], m: number): [num
   ]
 }
 
-/**
- * The polyline between two cumulative lengths, with the exact cut points
- * interpolated at both ends so adjacent slices meet without a gap.
- */
-function slice(points: [number, number][], lengths: number[], fromM: number, toM: number): [number, number][] {
-  const out: [number, number][] = [pointAt(points, lengths, fromM)]
-  for (let i = 0; i < points.length; i++) {
-    if (lengths[i] > fromM && lengths[i] < toM) out.push(points[i])
-  }
-  out.push(pointAt(points, lengths, toM))
-  return out
-}
-
 /** Parallel copy of the polyline, offset by d metres to its left. */
 export function offsetPolyline(points: [number, number][], d: number): [number, number][] {
   return points.map((p, i) => {
@@ -290,6 +277,71 @@ const TURNOUT_HALF_WINDOW_M = 500
 const TURNOUT_SAMPLE_STEP_M = 20
 
 /**
+ * The cumulative scene lengths one section's track polylines are sampled at:
+ * native centreline vertices through the middle, densified to
+ * TURNOUT_SAMPLE_STEP_M inside each turnout window (so the eased offset
+ * renders as a curve, not a straight chord between whatever OSM vertices
+ * happen to fall nearby).
+ */
+function sectionSampleStations(
+  sections: TrackSection[],
+  s: number,
+  lengths: number[],
+  scale: number,
+): number[] {
+  const section = sections[s]
+  const fromScene = section.fromM * scale
+  const toScene = section.toM * scale
+  const totalLen = toScene - fromScene
+  if (totalLen <= 0) return []
+  const half = Math.min(TURNOUT_HALF_WINDOW_M, totalLen / 2)
+  const hasStart = s > 0
+  const hasEnd = s < sections.length - 1
+  const out: number[] = []
+  if (hasStart) {
+    for (let m = fromScene; m < fromScene + half; m += TURNOUT_SAMPLE_STEP_M) out.push(m)
+  }
+  const midFrom = hasStart ? fromScene + half : fromScene
+  const midTo = hasEnd ? toScene - half : toScene
+  if (midTo > midFrom) {
+    out.push(midFrom)
+    for (const l of lengths) if (l > midFrom && l < midTo) out.push(l)
+    out.push(midTo)
+  } else {
+    out.push((midFrom + midTo) / 2)
+  }
+  if (hasEnd) {
+    for (let m = toScene - half + TURNOUT_SAMPLE_STEP_M; m < toScene; m += TURNOUT_SAMPLE_STEP_M) {
+      out.push(m)
+    }
+    out.push(toScene)
+  }
+  return out
+}
+
+/**
+ * Every station the corridor is sampled at, across all sections, ascending
+ * and deduplicated. Anything drawn *under* the rails — the ballast bed —
+ * has to use exactly these, not the raw centreline vertices: both surfaces
+ * take their height from the terrain, so wherever one chords a longer span
+ * than the other, the two part company. Sampling the bed on the sparser
+ * native vertices alone let it ride straight over dips the denser track
+ * polylines follow down into, and the rails vanished under their own
+ * ballast (worst case ~3 scene-m, in the turnout windows where the tracks
+ * densify to 20 m and the bed still stepped 77 m).
+ */
+export function corridorSampleStations(network: NetworkData, track: TrainTrack): number[] {
+  const total = track.lengths[track.lengths.length - 1]
+  const all: number[] = []
+  for (let s = 0; s < network.sections.length; s++) {
+    for (const m of sectionSampleStations(network.sections, s, track.lengths, track.scale)) {
+      all.push(Math.max(0, Math.min(total, m)))
+    }
+  }
+  return [...new Set(all)].sort((a, b) => a - b)
+}
+
+/**
  * One polyline per running track. Section chainages index the corridor by
  * its own planar length — scene length and baked chainage agree within the
  * projection's distortion (<0.1% over this corridor).
@@ -323,25 +375,11 @@ export function buildTrackPolylines(
     const startMatch = prevSection ? matchBoundary(prevSection.tracks, section.tracks, spacingM) : null
     const endMatch = nextSection ? matchBoundary(section.tracks, nextSection.tracks, spacingM) : null
 
-    // Base vertices: densely resampled inside each turnout window (so the
-    // eased offset actually renders as a curve, not a straight chord between
-    // whatever OSM vertices happen to fall nearby), native vertices between.
-    const base: [number, number][] = []
-    if (startMatch) {
-      for (let m = fromScene; m < fromScene + half; m += TURNOUT_SAMPLE_STEP_M) {
-        base.push(pointAt(centerline, lengths, m))
-      }
-    }
-    const midFrom = startMatch ? fromScene + half : fromScene
-    const midTo = endMatch ? toScene - half : toScene
-    if (midTo > midFrom) base.push(...slice(centerline, lengths, midFrom, midTo))
-    else base.push(pointAt(centerline, lengths, (midFrom + midTo) / 2))
-    if (endMatch) {
-      for (let m = toScene - half + TURNOUT_SAMPLE_STEP_M; m < toScene; m += TURNOUT_SAMPLE_STEP_M) {
-        base.push(pointAt(centerline, lengths, m))
-      }
-      base.push(pointAt(centerline, lengths, toScene))
-    }
+    // Base vertices: one per sampling station (see sectionSampleStations —
+    // the ballast bed under these tracks samples the same stations).
+    const base = sectionSampleStations(sections, s, lengths, scale).map((m) =>
+      pointAt(centerline, lengths, m),
+    )
     if (base.length < 2) continue
     const baseLengths = cumulativeLength(base)
     const baseTotal = baseLengths[baseLengths.length - 1]
