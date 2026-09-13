@@ -3,7 +3,8 @@ import westernJson from '../data/western.json'
 import realTimetableJson from '../data/western-real-timetable.json'
 import type { NetworkData } from '../data/network-types'
 import { sectionAtChainage } from './lines'
-import { faceTracksByStation, platformSlabs, type HaltingService } from './platforms'
+import { LINE_FAST_UP, LINE_SLOW_DOWN, LINE_SLOW_UP } from './types'
+import { faceForHalt, faceTracksByStation, platformSlabs, type HaltingService } from './platforms'
 
 const network = westernJson as NetworkData
 const services: HaltingService[] = (
@@ -60,6 +61,55 @@ describe('platform faces', () => {
     expect(after.get('churchgate')).toEqual([0, 1])
     for (const [, tracks] of after) {
       for (const track of tracks) expect(track).toBeLessThan(2)
+    }
+  })
+})
+
+describe('halting at a face', () => {
+  const chainageOf = (id: string) => network.stations.find((s) => s.id === id)!.chainageM
+
+  it('halts an up slow service at the up slow face', () => {
+    // Slow Down and Slow Up are Tracks 0 and 1 on every section wide enough
+    // to keep them apart, which is everywhere south of Virar.
+    expect(faceForHalt(network, LINE_SLOW_UP, chainageOf('dadar'))).toBe(1)
+    expect(faceForHalt(network, LINE_SLOW_DOWN, chainageOf('dadar'))).toBe(0)
+  })
+
+  it('halts a fast service at a different face from a slow one, same direction', () => {
+    const fast = faceForHalt(network, LINE_FAST_UP, chainageOf('borivali'))
+    const slow = faceForHalt(network, LINE_SLOW_UP, chainageOf('borivali'))
+    expect(fast).not.toBe(slow)
+  })
+
+  it('puts a fast and a slow service on one face where the route is two tracks', () => {
+    // North of Virar there are two Tracks, so a Fast and a Slow Up service
+    // are on the same rails and so at the same Face. That is the railway,
+    // not a modelling shortcut.
+    const chainage = chainageOf('palghar')
+    expect(faceForHalt(network, LINE_FAST_UP, chainage)).toBe(
+      faceForHalt(network, LINE_SLOW_UP, chainage),
+    )
+  })
+
+  it('answers the same way every time it is asked', () => {
+    for (const station of network.stations) {
+      for (const lineId of [0, 1, 2, 3, 4, 5]) {
+        const once = faceForHalt(network, lineId, station.chainageM)
+        const twice = faceForHalt(network, lineId, station.chainageM)
+        expect(twice, `${station.name} line ${lineId}`).toBe(once)
+      }
+    }
+  })
+
+  it('never sends an up service to a down face', () => {
+    for (const station of network.stations) {
+      const tracks = sectionAtChainage(network.sections, station.chainageM).tracks
+      for (const lineId of [LINE_SLOW_UP, LINE_FAST_UP]) {
+        const face = faceForHalt(network, lineId, station.chainageM)
+        // Up Lines are odd, and fold onto odd Tracks — except on the
+        // two-Track stretch, where Track 1 is the single Up road.
+        expect(face % 2, `${station.name} line ${lineId} (${tracks} tracks)`).toBe(1)
+      }
     }
   })
 })

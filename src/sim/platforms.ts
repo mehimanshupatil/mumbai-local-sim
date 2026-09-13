@@ -21,6 +21,24 @@
 import type { NetworkData } from '../data/network-types'
 import { sectionAtChainage, trackForLine } from './lines'
 
+/**
+ * The Face a Service Halts at: the one beside the Track its Line runs on at
+ * that Station. A pure function of (Line, Station) — direction is carried in
+ * the Line, every *_UP constant being odd — so it is the same answer every
+ * time it is asked, and asking it costs nothing.
+ *
+ * Identified by Track index rather than a number, because Face *numbering* is
+ * out of scope and could not be a number anyway: real WR numbering has
+ * lettered Faces (1A, 3A, 5A). See ADR 0001.
+ */
+export function faceForHalt(
+  network: NetworkData,
+  lineId: number,
+  stationChainageM: number,
+): number {
+  return trackForLine(lineId, sectionAtChainage(network.sections, stationChainageM).tracks)
+}
+
 /** A Service as this needs to see it: the Line it runs on, and where it stops. */
 export interface HaltingService {
   lineId: number
@@ -44,8 +62,7 @@ export function faceTracksByStation(
     for (const stationId of service.stopIds) {
       const chainageM = chainageOf.get(stationId)
       if (chainageM === undefined) continue
-      const tracks = sectionAtChainage(network.sections, chainageM).tracks
-      const track = trackForLine(service.lineId, tracks)
+      const track = faceForHalt(network, service.lineId, chainageM)
       const set = faces.get(stationId)
       if (set) set.add(track)
       else faces.set(stationId, new Set([track]))
