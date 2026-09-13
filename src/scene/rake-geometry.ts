@@ -195,65 +195,68 @@ export function platformNoseOffsetM(
 
 /** Lateral gap two rakes need before their bodies stop interpenetrating. */
 const CLEAR_M = 22
-/** Relaxation passes, so a rake pushed off one neighbour also clears the next. */
-const SEPARATION_PASSES = 3
-/** Fraction of a rake length the bodies must draw apart before the push
- * starts easing off. Fading from the moment they touch leaves the
- * half-overlapping pairs — the obvious ones — barely pushed at all. */
-const FADE_FROM = 0.75
 
 export interface DrawnRake {
   /** Along-corridor position of the rake as drawn, nose offset included. */
   along: number
-  /** Offset from the corridor centreline as drawn; this is what gets pushed. */
+  /** Lateral of the line this service is timetabled on. */
+  home: number
+  /** Laterals of the other lines running the same way here, nearest first. */
+  alternatives: number[]
+  /** Where it ends up: its own line, or one it has been put onto. */
   lateral: number
 }
 
 /**
- * Pushes rakes apart sideways until none of them interpenetrate, working on
- * where they are actually *drawn*.
+ * Decides which line each rake is drawn on, so that no two are drawn inside
+ * each other and every one still sits on a line.
  *
  * There is no block-signalling model — that needs real block occupancy in the
  * sim and is out of scope — so the timetable legitimately puts two services
- * through the same stretch at once, and drawing a 12-car rake at more than
- * twice true length (see config.ts) makes near-misses into overlaps too. Both
- * end as two trains inside each other.
+ * through the same stretch at once: most overlapping pairs are trains
+ * genuinely less than a true rake length apart, and drawing a 12-car rake at
+ * over twice true length (see config.ts) turns near misses into overlaps too.
  *
- * Deconflicting on chainage and lane index, as this used to, misses most of
- * it: what the viewer sees is offset from the chainage by the platform-nose
- * blend, and adjacent sections' lanes are not comparable by index at all.
- * Pairs that shared drawn space while their chainages were a rake-length
- * apart were never pushed. Comparing drawn positions catches those, and a few
- * relaxation passes handle a third rake caught between two neighbours, whose
- * pushes used to cancel.
+ * A clashing train is therefore put onto another line running the same way —
+ * a slow service held on the fast line to clear one ahead of it, which is
+ * what actually happens out there — rather than being shoved sideways into
+ * the gap between two lines, which is where simply pushing them apart ends.
+ * Only same-direction lines are offered, so nothing is ever drawn running
+ * against the traffic, and a rake with nowhere to go keeps its own line.
+ *
+ * Callers pass rakes leading-train-first within each direction, so the train
+ * ahead keeps the line it is timetabled on and the one coming up behind is
+ * the one put across — the way round it happens in traffic, and stable from
+ * frame to frame because that order only changes when one actually passes
+ * the other. Where every line running that way is occupied, the rake takes
+ * whichever leaves the least overlap.
  */
-export function separateOverlaps(rakes: DrawnRake[]): void {
-  if (rakes.length < 2) return
-  const order = rakes.map((_, i) => i).sort((a, b) => rakes[a].along - rakes[b].along)
-  for (let pass = 0; pass < SEPARATION_PASSES; pass++) {
-    let moved = false
-    for (let i = 0; i < order.length; i++) {
-      const a = rakes[order[i]]
-      for (let j = i + 1; j < order.length; j++) {
-        const b = rakes[order[j]]
-        const along = b.along - a.along
-        if (along >= RAKE_LEN) break // sorted: nothing further along can overlap either
-        const gap = b.lateral - a.lateral
-        const deficit = CLEAR_M - Math.abs(gap)
-        if (deficit <= 0) continue
-        // Full push while the bodies genuinely overlap, easing out only over
-        // the last stretch as they draw apart, so a push never appears or
-        // vanishes in one frame but also never gives up while it is needed.
-        const strength = 1 - smoothstep((along - RAKE_LEN * FADE_FROM) / (RAKE_LEN * (1 - FADE_FROM)))
-        // Ties (exactly the same lateral) split by a stable rule rather than
-        // by whichever happened to be first, so the pair does not flicker.
-        const dir = gap === 0 ? (order[i] < order[j] ? -1 : 1) : Math.sign(gap)
-        const push = (deficit / 2) * strength * dir
-        a.lateral -= push
-        b.lateral += push
-        moved = true
+export function assignLanes(rakes: DrawnRake[]): void {
+  const placed: DrawnRake[] = []
+  /** Worst lengthwise overlap this lateral would leave, 0 if it is clear. */
+  const conflict = (lateral: number, rake: DrawnRake) => {
+    let worst = 0
+    for (const p of placed) {
+      if (Math.abs(p.lateral - lateral) >= CLEAR_M) continue
+      const along = Math.abs(p.along - rake.along)
+      if (along >= RAKE_LEN) continue
+      worst = Math.max(worst, RAKE_LEN - along)
+    }
+    return worst
+  }
+  for (const rake of rakes) {
+    rake.lateral = rake.home
+    let best = conflict(rake.home, rake)
+    if (best > 0) {
+      for (const lat of rake.alternatives) {
+        const c = conflict(lat, rake)
+        if (c < best) {
+          best = c
+          rake.lateral = lat
+        }
+        if (best === 0) break
       }
     }
-    if (!moved) break
+    placed.push(rake)
   }
 }

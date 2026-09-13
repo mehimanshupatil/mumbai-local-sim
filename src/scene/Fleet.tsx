@@ -11,6 +11,7 @@ import {
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import {
+  assignLanes,
   buildYardRoadTracks,
   COACHES,
   laneLateralAtChainage,
@@ -19,7 +20,6 @@ import {
   platformNoseOffsetM,
   RAKE_LEN,
   roadForSlot,
-  separateOverlaps,
 } from './rake-geometry'
 import { simClock } from './sim-clock'
 import { buildTrainTrack, poseAt, type TrainTrack } from './track-geometry'
@@ -28,6 +28,11 @@ const BODY_W = 18
 const BODY_H = 18
 /** Instance capacity — plenty above the ~70 concurrent rakes at peak. */
 const MAX_RAKES = 128
+/** How fast a rake slides across when it is put onto another line, in
+ * e-folds per second — a crossover you can watch, not a teleport. */
+const LANE_CHANGE_RATE = 0.9
+/** The semantic track indices, as declared in sim/types.ts. */
+const SEMANTIC_TRACKS = [0, 1, 2, 3, 4, 5]
 /** Rakes fatten up to BULK_MAX x as the camera passes BULK_DISTANCE_M away. */
 const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
@@ -84,6 +89,8 @@ export function Fleet({
   const noseGeo = useMemo(() => noseGeometry(), [])
   /** Service id per drawn rake slot, refreshed every frame for click picking. */
   const rakeIds = useRef<string[]>([])
+  /** Last drawn lateral per service, so a line change eases instead of popping. */
+  const lateralRef = useRef(new Map<string, number>())
 
   const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
   const yardRoads = useMemo(
@@ -105,7 +112,7 @@ export function Fleet({
     [],
   )
 
-  useFrame(({ camera }) => {
+  useFrame(({ camera }, delta) => {
     const bodies = bodyRef.current
     const stripes = stripeRef.current
     const lights = lightRef.current
@@ -117,28 +124,60 @@ export function Fleet({
       console.warn(`Fleet: ${states.length} concurrent rakes exceed capacity ${MAX_RAKES}; truncating`)
     }
     // Where each rake will actually be drawn: nose shifted to the platform
-    // edge on an approach or departure, lateral eased between lanes across a
-    // section boundary. Deconfliction has to run on *these* numbers — see
-    // separateOverlaps — not on chainage and lane index.
+    // edge on an approach or departure, lateral taken from the line it is
+    // timetabled on — with the lines running the same way offered as fallbacks
+    // if that one is already occupied here (see assignLanes).
     const rakes = states.map((state) => {
       const dirSign = state.direction === 'down' ? 1 : -1
       const nextStopChainageM = stationChainageById.get(state.nextStopId) ?? state.chainageM
-      const refOffset = state.parkedYardId
+      const parked = state.parkedYardId !== null
+      const refOffset = parked
         ? 0
         : dirSign * platformNoseOffsetM(state.chainageM, nextStopChainageM, state.legDistanceM)
+      const home = parked ? 0 : laneLateralAtChainage(sections, state.track, state.chainageM)
+      // Every line running the same way, nearest first — same parity as the
+      // service's own track, since every *_UP constant is odd. Nearest first
+      // means a slow service reaches for the fast line beside it before the
+      // express road beyond it, and a fast one drops to the slow line only
+      // when the express road is taken too.
+      const alternatives = parked
+        ? []
+        : SEMANTIC_TRACKS.filter((t) => t % 2 === state.track % 2 && t !== state.track)
+            .map((t) => laneLateralAtChainage(sections, t, state.chainageM))
+            .filter((lat) => Math.abs(lat - home) > 1)
+            .sort((a, b) => Math.abs(a - home) - Math.abs(b - home))
       return {
         state,
         dirSign,
         refOffset,
         along: state.chainageM + refOffset,
-        lateral: state.parkedYardId
-          ? 0
-          : laneLateralAtChainage(sections, state.track, state.chainageM),
+        home,
+        alternatives,
+        lateral: home,
       }
     })
     // Parked rakes stand on their own roads and share no space with anything
-    // on the corridor, so they take no part in this.
-    separateOverlaps(rakes.filter((r) => !r.state.parkedYardId))
+    // on the corridor, so they take no part in this. Ordered leading train
+    // first — down services run up the chainage, up services down it — so the
+    // train ahead keeps its own line and the follower is the one put across.
+    const running = rakes.filter((r) => r.state.parkedYardId === null)
+    running.sort((a, b) => b.dirSign * b.along - a.dirSign * a.along)
+    assignLanes(running)
+
+    // Eased toward the assigned line rather than snapped onto it, so being
+    // put onto the fast line reads as a train crossing over.
+    const smoothed = lateralRef.current
+    const damp = 1 - Math.exp(-LANE_CHANGE_RATE * delta)
+    for (const r of rakes) {
+      const prev = smoothed.get(r.state.id)
+      const next = prev === undefined ? r.lateral : prev + (r.lateral - prev) * damp
+      smoothed.set(r.state.id, next)
+      r.lateral = next
+    }
+    if (smoothed.size > states.length * 4) {
+      const live = new Set(states.map((s) => s.id))
+      for (const id of smoothed.keys()) if (!live.has(id)) smoothed.delete(id)
+    }
     let n = 0
     let rake = 0
     for (const { state, dirSign: baseDirSign, refOffset: baseRefOffset, lateral: drawnLateral } of rakes) {
