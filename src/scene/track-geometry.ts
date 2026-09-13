@@ -276,11 +276,18 @@ export function terminusStub(
   const stubs: { points: [number, number][]; buffer: [number, number]; angleRad: number }[] = []
   for (let t = 0; t < sectionTracks; t++) {
     const off = centeredOffset(t, sectionTracks, spacingM)
-    const end: [number, number] = [
-      ox - dirX * TERMINUS_STUB_M + normX * off,
-      oz - dirZ * TERMINUS_STUB_M + normZ * off,
+    const at = (s: number): [number, number] => [
+      ox - dirX * s + normX * off,
+      oz - dirZ * s + normZ * off,
     ]
-    stubs.push({ points: [end], buffer: end, angleRad })
+    // Sampled at the same stations the ballast bed uses out here (see
+    // corridorSampleStations), not as one 360 m chord. Both take their height
+    // from the terrain, so a track that chords a span the bed follows sinks
+    // straight through it — which is exactly what a single-segment stub did,
+    // by up to 4.2 scene-m, burying the rails at the terminus.
+    const points: [number, number][] = []
+    for (let s = TERMINUS_STUB_M; s > 0; s -= TURNOUT_SAMPLE_STEP_M) points.push(at(s))
+    stubs.push({ points, buffer: at(TERMINUS_STUB_M), angleRad })
   }
   return stubs
 }
