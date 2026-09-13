@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { MapControls, Sky, Stars } from '@react-three/drei'
-import { network, timetables, type Focus } from '../app-data'
+import { faceTracks, network, timetables, type Focus } from '../app-data'
 import { Atmosphere } from './Atmosphere'
 import { Bridges } from './Bridges'
 import { CameraRig, type ControlsLike } from './CameraRig'
@@ -116,6 +116,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
             projection={projection}
             heightfield={heightfield}
             night={daylight.night}
+            faceTracks={faceTracks}
             onSelectStation={(stationId) => onFocus({ mode: 'station', stationId })}
           />
           <Corridor

@@ -6,6 +6,7 @@ import westernJson from './data/western.json'
 import realTimetableJson from './data/western-real-timetable.json'
 import type { NetworkData } from './data/network-types'
 import { syntheticScheduler } from './sim/scheduler'
+import { faceTracksByStation } from './sim/platforms'
 import { buildRealTimetable, buildTimetable, type Timetable } from './sim/simulate'
 import type { ServiceType } from './sim/types'
 
@@ -33,6 +34,19 @@ const syntheticExpresses: Timetable[] = syntheticScheduler(network)
   .map((def) => buildTimetable(network, def))
 
 export const timetables: Timetable[] = [...realTimetables, ...syntheticExpresses]
+
+/**
+ * Which Tracks each Station has a Platform Face beside, derived from the
+ * Section's Track count and the Services that actually Halt there — never
+ * baked, see docs/adr/0001-platform-faces-derived-not-baked.md.
+ */
+export const faceTracks = faceTracksByStation(
+  network,
+  timetables.map((tt) => ({
+    lineId: tt.def.lineId,
+    stopIds: tt.stops.map((s) => s.id),
+  })),
+)
 
 /**
  * How the camera rides a followed service. Chase keeps the whole rake in

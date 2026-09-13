@@ -25,12 +25,19 @@ import {
   projectOnTrack,
   type TrainTrack,
 } from './track-geometry'
+import { TRACK_WIDTH_SCENE_M } from './Corridor'
+import { platformSlabs } from '../sim/platforms'
 import { BOARD_WIDTH, WRBoard } from './WRBoard'
 
 const BALLAST_MARGIN_M = 22
 const BALLAST_COLOR = '#57504a'
 const PLATFORM_L = PLATFORM_LENGTH_SCENE_M
 const PLATFORM_W = 32
+/**
+ * An island sits in the gap between two Track ribbons, so it can only be as
+ * wide as that gap leaves — a side platform has the whole outside of the fan.
+ */
+const ISLAND_PLATFORM_W = TRACK_SPACING_SCENE_M - TRACK_WIDTH_SCENE_M - 3
 const PLATFORM_H = 10
 const PLATFORM_COLOR = '#8f8a84'
 const BOARD_Y = 150
@@ -197,11 +204,11 @@ function platformGeometry(
   track: TrainTrack,
   heightfield: Heightfield,
   station: StationPose,
-  side: 1 | -1,
+  centerOffset: number,
+  width: number,
 ): BufferGeometry {
-  const centerOffset = ((station.tracks * TRACK_SPACING_SCENE_M) / 2 + PLATFORM_W / 2 + 6) * side
-  const innerOffset = centerOffset - side * (PLATFORM_W / 2)
-  const outerOffset = centerOffset + side * (PLATFORM_W / 2)
+  const innerOffset = centerOffset - width / 2
+  const outerOffset = centerOffset + width / 2
   const positions: number[] = []
   const indices: number[] = []
   for (let k = 0; k <= PLATFORM_STEPS; k++) {
@@ -265,6 +272,7 @@ export function StationDressing({
   projection,
   heightfield,
   night,
+  faceTracks,
   onSelectStation,
 }: {
   network: NetworkData
@@ -272,6 +280,8 @@ export function StationDressing({
   heightfield: Heightfield
   /** 0 = full day, 1 = full night; dims the unlit station boards. */
   night: number
+  /** Tracks each Station has a Platform Face beside — see src/sim/platforms.ts. */
+  faceTracks: Map<string, number[]>
   onSelectStation: (stationId: string) => void
 }) {
   const track = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
@@ -303,16 +313,31 @@ export function StationDressing({
   // Two platforms per station, flanking the outermost tracks, each a small
   // standalone mesh curved to the local track (see platformGeometry) —
   // one shared instanced box can't follow a curve that differs per station.
+  /**
+   * A platform per derived slab, not two flanking every Station regardless of
+   * reality: an island between each pair of Tracks that both take Halts, a
+   * side platform beside a lone one (see src/sim/platforms.ts and ADR 0001).
+   */
   const platforms = useMemo(
     () =>
-      stations.flatMap((station) =>
-        ([1, -1] as const).map((side) => ({
-          key: `${station.id}-${side}`,
-          station,
-          geometry: platformGeometry(track, heightfield, station, side),
-        })),
-      ),
-    [stations, track, heightfield],
+      stations.flatMap((station) => {
+        const centre = (t: number) => (t - (station.tracks - 1) / 2) * TRACK_SPACING_SCENE_M
+        return platformSlabs(faceTracks.get(station.id) ?? [], station.tracks).map((slab, i) => {
+          // An island has to fit the gap the Track ribbons leave between them;
+          // a side platform has the whole outside of the fan to spread into.
+          const isIsland = slab.tracks.length === 2
+          const width = isIsland ? ISLAND_PLATFORM_W : PLATFORM_W
+          const centerOffset = isIsland
+            ? (centre(slab.tracks[0]!) + centre(slab.tracks[1]!)) / 2
+            : centre(slab.tracks[0]!) + slab.side * (TRACK_WIDTH_SCENE_M / 2 + width / 2 + 2)
+          return {
+            key: `${station.id}-${i}`,
+            station,
+            geometry: platformGeometry(track, heightfield, station, centerOffset, width),
+          }
+        })
+      }),
+    [stations, track, heightfield, faceTracks],
   )
 
   /**

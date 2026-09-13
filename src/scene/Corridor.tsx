@@ -15,7 +15,7 @@ import { WRBoard } from './WRBoard'
 const TRACK_LIFT = 0.6
 /** A single track's visible width — real broad-gauge sleepers are ~2.6 m,
  * scaled by RENDER_EXAGGERATION (5x, see config.ts) to ~13 m. */
-const TRACK_WIDTH_SCENE_M = 13
+export const TRACK_WIDTH_SCENE_M = 13
 /**
  * Length of track covered by one texture tile (4 sleepers, see
  * track-texture.ts). True-to-scale sleeper spacing (~3 scene-m) would be a
