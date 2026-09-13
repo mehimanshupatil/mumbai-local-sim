@@ -24,7 +24,7 @@ import {
   sectionAtChainage,
   type TrainTrack,
 } from './track-geometry'
-import { WRBoard } from './WRBoard'
+import { BOARD_WIDTH, WRBoard } from './WRBoard'
 
 const BALLAST_MARGIN_M = 22
 const BALLAST_COLOR = '#57504a'
@@ -43,13 +43,34 @@ const BOARD_Y = 150
 const BOARD_FADE_NEAR = 4000
 const BOARD_FADE_FAR = 12000
 /**
- * Below this the board shrinks with distance instead of holding world size.
- * It is sized to be read from the station camera's ~2.3 km, so the cab and
- * lineside views — the first cameras to come within a hundred metres of one —
- * met a signboard several storeys tall filling half the frame.
+ * Close in, the floating board hands over to the boards standing on the
+ * platform (see platformBoards) — the ones a real station actually has. Left
+ * on, a signboard several storeys tall hangs over the roof of the station in
+ * every close view.
  */
-const BOARD_NEAR_FULL_M = 1400
-const BOARD_MIN_SCALE = 0.06
+const BOARD_HANDOVER_NEAR = 700
+const BOARD_HANDOVER_FAR = 1700
+/**
+ * Name boards along each platform, standing square across it — the board face
+ * perpendicular to the rails, so it reads to a train coming up the platform
+ * and, in this scene, to a camera looking along the corridor.
+ * Sized to the platform: standing square across it, the board's width is
+ * what spans the platform, so anything wider than the platform hangs out over
+ * the tracks either side. That puts it far below the floating board, which is
+ * scaled to be read from the station camera 2.3 km up — at that distance
+ * these are specks, and they are meant for the views that get close enough to
+ * read them.
+ */
+const PLATFORM_BOARD_W = PLATFORM_W * 0.8
+const PLATFORM_BOARD_SCALE = PLATFORM_BOARD_W / BOARD_WIDTH
+const PLATFORM_BOARD_POST_H = 13
+/** Boards per platform face — one turned toward each end. */
+const PLATFORM_BOARDS = 2
+/** How far in from the platform end a board stands. */
+const PLATFORM_BOARD_INSET_M = 70
+/** Past this the platform boards are too small to resolve, so skip drawing
+ * them rather than paying for a few hundred text meshes every frame. */
+const PLATFORM_BOARD_VISIBLE_M = 3500
 /** Sample points along a platform's length — enough to read as following the
  * local track curve on a bend (e.g. Bandra, Dadar) without a visible facet. */
 const PLATFORM_STEPS = 6
@@ -284,9 +305,55 @@ export function StationDressing({
     [stations, track, heightfield],
   )
 
+  /**
+   * Name boards standing along each platform face, looking across the track —
+   * which is where a real WR board is and which way it points, so it can be
+   * read from a train. Laid out off the same poses as the platform itself.
+   */
+  const platformBoards = useMemo(
+    () =>
+      stations.flatMap((station) => {
+        const out: {
+          key: string
+          station: StationPose
+          position: [number, number, number]
+          yaw: number
+        }[] = []
+        for (const side of [1, -1] as const) {
+          const centerOffset =
+            ((station.tracks * TRACK_SPACING_SCENE_M) / 2 + PLATFORM_W / 2 + 6) * side
+          // Set in from the platform's track-side edge, clear of the coaches.
+          const offset = centerOffset - side * (PLATFORM_W / 2 - 5)
+          for (let k = 0; k < PLATFORM_BOARDS; k++) {
+            // One toward each end of the platform, each turned to face the
+            // end it is nearest, so a train arriving from either direction
+            // meets a board square on rather than edge on.
+            const facesUp = k === 0
+            const along = (facesUp ? -1 : 1) * (PLATFORM_L / 2 - PLATFORM_BOARD_INSET_M)
+            const pose = poseAt(track, station.chainageM, along)
+            const nx = -Math.cos(pose.angleRad)
+            const nz = Math.sin(pose.angleRad)
+            const x = pose.x + nx * offset
+            const z = pose.z + nz * offset
+            out.push({
+              key: `${station.id}-${side}-${k}`,
+              station,
+              position: [x, heightfield.railY(x, z) + PLATFORM_H + PLATFORM_BOARD_POST_H, z],
+              // poseAt's angle looks up the chainage; the board's own face is
+              // turned along the rails, one board each way.
+              yaw: pose.angleRad + (facesUp ? Math.PI : 0),
+            })
+          }
+        }
+        return out
+      }),
+    [stations, track, heightfield],
+  )
+
   // Hand the boards over to Corridor's floating labels as the camera pulls
   // back (see BOARD_FADE_NEAR/FAR).
   const boardRefs = useRef<(Group | null)[]>([])
+  const platformBoardsRef = useRef<Group>(null)
   const boardPoints = useMemo(
     () => stations.map((s) => new Vector3(s.x, s.y + BOARD_Y, s.z)),
     [stations],
@@ -296,9 +363,17 @@ export function StationDressing({
       const board = boardRefs.current[i]
       if (!board) continue
       const dist = camera.position.distanceTo(boardPoints[i])
-      const t = (BOARD_FADE_FAR - dist) / (BOARD_FADE_FAR - BOARD_FADE_NEAR)
-      const near = Math.max(BOARD_MIN_SCALE, Math.min(1, dist / BOARD_NEAR_FULL_M))
-      board.scale.setScalar(Math.min(1, Math.max(0, t)) * near)
+      const far = (BOARD_FADE_FAR - dist) / (BOARD_FADE_FAR - BOARD_FADE_NEAR)
+      const near = (dist - BOARD_HANDOVER_NEAR) / (BOARD_HANDOVER_FAR - BOARD_HANDOVER_NEAR)
+      board.scale.setScalar(Math.min(1, Math.max(0, far)) * Math.min(1, Math.max(0, near)))
+    }
+    // The platform boards are life-sized, so they are worth drawing only from
+    // close in; past that they are sub-pixel and cost a text mesh apiece.
+    const group = platformBoardsRef.current
+    if (group) {
+      group.visible =
+        camera.position.distanceTo(group.position) < PLATFORM_BOARD_VISIBLE_M ||
+        boardPoints.some((p) => camera.position.distanceTo(p) < PLATFORM_BOARD_VISIBLE_M)
     }
   })
 
@@ -456,6 +531,29 @@ export function StationDressing({
           side={DoubleSide}
         />
       </instancedMesh>
+      <group ref={platformBoardsRef}>
+        {platformBoards.map(({ key, station, position, yaw }) => (
+          <group
+            key={key}
+            position={position}
+            rotation={[0, yaw, 0]}
+            scale={PLATFORM_BOARD_SCALE}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelectStation(station.id)
+            }}
+          >
+            <WRBoard name={station.name} nameMr={station.nameMr} night={night} />
+            {/* Post, in the board's own scaled space. */}
+            <mesh position={[0, -PLATFORM_BOARD_POST_H / PLATFORM_BOARD_SCALE / 2 - 28, 0]}>
+              <boxGeometry
+                args={[6, PLATFORM_BOARD_POST_H / PLATFORM_BOARD_SCALE, 6]}
+              />
+              <meshStandardMaterial color="#6b6f72" roughness={0.8} />
+            </mesh>
+          </group>
+        ))}
+      </group>
       {stations.map((s, i) => (
         <Billboard
           key={s.id}

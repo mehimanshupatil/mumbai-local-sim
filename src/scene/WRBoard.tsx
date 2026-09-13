@@ -7,6 +7,12 @@ const BOARD_W = 210
 const BOARD_H = 56
 
 /**
+ * The board's own width in scene metres, for callers that need to lay one out
+ * against real geometry (a platform, say) rather than float it.
+ */
+export const BOARD_WIDTH = BOARD_W
+
+/**
  * The board face is unlit (meshBasicMaterial), so it ignores the scene's
  * day/night lighting entirely. Left alone it blazes at full daytime yellow
  * against a near-black 21:00 scene, reading as a bug rather than a lit sign.
