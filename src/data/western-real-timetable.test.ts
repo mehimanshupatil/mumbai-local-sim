@@ -19,6 +19,20 @@ const timetable = realTimetableJson as {
 
 const stationIds = new Set(network.stations.map((s) => s.id))
 const chainageOf = new Map(network.stations.map((s) => [s.id, s.chainageM]))
+/** Stations a service runs through without stopping — the fast/slow tell. */
+const skippedStations = (stops: { stationId: string }[]) => {
+  const chains = network.stations.map((s) => s.chainageM)
+  let skipped = 0
+  for (let i = 1; i < stops.length; i++) {
+    const a = chainageOf.get(stops[i - 1].stationId)!
+    const b = chainageOf.get(stops[i].stationId)!
+    const [lo, hi] = a < b ? [a, b] : [b, a]
+    skipped += chains.filter((c) => c > lo && c < hi).length
+  }
+  return skipped
+}
+/** Same threshold the bake classifies on (scripts/bake-real-timetable.ts). */
+const FAST_SKIP_THRESHOLD = 7
 
 describe('baked real timetable (WR Public Time Tables)', () => {
   it('has provenance and a substantial number of services', () => {
@@ -65,13 +79,21 @@ describe('baked real timetable (WR Public Time Tables)', () => {
     expect(counts.ac).toBeGreaterThan(100)
   })
 
-  it('keeps slow/ac and fast services on disjoint track lanes per direction', () => {
+  // West to east the corridor runs slow-down, slow-up, fast-down, fast-up,
+  // then the express pair (see src/sim/types.ts and laneFor). Which pair a
+  // service belongs on follows its calling pattern, not its livery: 'ac' is a
+  // livery, and a real WR AC local runs both fast and slow workings.
+  it('puts every service on the pair of lines its calling pattern belongs to', () => {
     for (const svc of timetable.services) {
-      if (svc.serviceType === 'fast') {
-        expect([2, 3]).toContain(svc.track)
-      } else if (svc.serviceType === 'slow' || svc.serviceType === 'ac') {
-        expect([0, 1]).toContain(svc.track)
+      if (svc.serviceType === 'express') {
+        expect([4, 5], svc.id).toContain(svc.track)
+        continue
       }
+      const skipped = skippedStations(svc.stops)
+      const onFastPair = svc.track === 2 || svc.track === 3
+      expect(onFastPair, `${svc.id} (${svc.serviceType}, skips ${skipped})`).toBe(
+        skipped > FAST_SKIP_THRESHOLD,
+      )
     }
   })
 
@@ -116,9 +138,13 @@ describe('baked real timetable (WR Public Time Tables)', () => {
     expect(compliant.length / fastServices.length).toBeGreaterThan(0.9)
   })
 
-  it('gives every AC service the blue livery classification regardless of stop pattern', () => {
-    for (const svc of timetable.services) {
-      if (svc.serviceType === 'ac') expect(svc.stops.length).toBeGreaterThanOrEqual(2)
-    }
+  it('runs AC services as both fast and slow workings, as the real ones do', () => {
+    const ac = timetable.services.filter((s) => s.serviceType === 'ac')
+    const onFast = ac.filter((s) => s.track === 2 || s.track === 3)
+    const onSlow = ac.filter((s) => s.track === 0 || s.track === 1)
+    expect(ac.length).toBeGreaterThan(100)
+    expect(onFast.length).toBeGreaterThan(20)
+    expect(onSlow.length).toBeGreaterThan(20)
+    expect(onFast.length + onSlow.length).toBe(ac.length)
   })
 })

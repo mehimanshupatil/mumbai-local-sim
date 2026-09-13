@@ -156,9 +156,14 @@ function countSkippedStations(run: RawStop[]): number {
   return skipped
 }
 
+/** Skips enough intermediate stations to be running as a fast. */
+function isFastPattern(run: RawStop[]): boolean {
+  return countSkippedStations(run) > FAST_SKIP_THRESHOLD
+}
+
 function classifyServiceType(run: RawStop[], isAc: boolean): ServiceType {
-  if (isAc) return 'ac'
-  return countSkippedStations(run) > FAST_SKIP_THRESHOLD ? 'fast' : 'slow'
+  if (isAc) return 'ac' // a livery, not a calling pattern — see trackFor
+  return isFastPattern(run) ? 'fast' : 'slow'
 }
 
 // Semantic track lanes, matching src/sim/types.ts (kept independent — this
@@ -168,8 +173,16 @@ const TRACK_SLOW_UP = 1
 const TRACK_FAST_DOWN = 2
 const TRACK_FAST_UP = 3
 
-function trackFor(serviceType: ServiceType, direction: Direction): number {
-  const fast = serviceType === 'fast'
+/**
+ * Which pair of lines a service runs on. Taken from the calling pattern, not
+ * from the service type: 'ac' is a livery, and a real WR AC local runs both
+ * fast and slow workings. Keyed off serviceType alone, every AC service went
+ * on the slow pair — including the half of them that skip as many stations as
+ * a classified fast, which then sat on the same rails as the stopping trains
+ * they are timetabled to overtake.
+ */
+function trackFor(serviceType: ServiceType, direction: Direction, run: RawStop[]): number {
+  const fast = serviceType === 'fast' || isFastPattern(run)
   if (direction === 'down') return fast ? TRACK_FAST_DOWN : TRACK_SLOW_DOWN
   return fast ? TRACK_FAST_UP : TRACK_SLOW_UP
 }
@@ -233,7 +246,7 @@ function main() {
         id: rawRuns.length > 1 ? `${train.trainNumber}-${i}` : train.trainNumber,
         serviceType,
         direction,
-        track: trackFor(serviceType, direction),
+        track: trackFor(serviceType, direction, repaired),
         cars: train.cars,
         stops: repaired.map((s) => ({
           stationId: stationOf(s.stationId).id,
