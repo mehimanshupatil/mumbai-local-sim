@@ -26,3 +26,13 @@
 - pnpm 11: build-script approvals live in `pnpm-workspace.yaml` (`allowBuilds`), not package.json.
 - Track counts genuinely differ per section (4 / 5–6 / 4 / 2 along the corridor); two 4-track gaps inside Mumbai Central–Borivali are real (Harbour line is a separate excluded service; 6th line under construction) and are pinned by tests — don't "fix" them.
 - Real WR fast trains run several distinct calling patterns, not the one idealized skip-list the v1 spec assumed (confirmed baking `western-real-timetable.json`: only ~37% of real fast services match that exact pattern south of Borivali). What holds universally is that every major interchange stays served — see `src/data/western-real-timetable.test.ts`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues in `mehimanshupatil/mumbai-local-sim`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
