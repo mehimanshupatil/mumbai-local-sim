@@ -329,6 +329,56 @@ function slicePolyline(points: LonLat[], chain: number[], fromM: number, toM: nu
 }
 
 /** Douglas-Peucker simplification (epsilon in metres), then cap gaps at maxGapM. */
+/** Turn angle in degrees at b, going a -> b -> c. 180 = a full reversal. */
+function turnDeg(a: LonLat, b: LonLat, c: LonLat): number {
+  const refLat = b[1]
+  const [ax, ay] = toXY(a, refLat)
+  const [bx, by] = toXY(b, refLat)
+  const [cx, cy] = toXY(c, refLat)
+  const h1 = Math.atan2(bx - ax, by - ay)
+  const h2 = Math.atan2(cx - bx, cy - by)
+  let d = h2 - h1
+  while (d > Math.PI) d -= 2 * Math.PI
+  while (d < -Math.PI) d += 2 * Math.PI
+  return Math.abs((d * 180) / Math.PI)
+}
+
+/**
+ * Any real alignment on this corridor turns at most ~10 deg between adjacent
+ * vertices. A far sharper turn means the routed path doubled back on itself —
+ * the shortest path through the rail graph can visit two nodes out of order
+ * where crossovers link parallel ways, which is a real 173 deg hairpin in the
+ * OSM data 1.1 km south of Virar: the corridor, every track offset from it,
+ * the ballast bed and any train posed through it all wrap back on themselves
+ * for ~50 m. Well clear of any legitimate curve, so a backtrack is always the
+ * routing artefact and never the alignment.
+ */
+const MAX_TURN_DEG = 60
+/** What the *baked* corridor must satisfy, checked after simplify/densify. */
+const MAX_BAKED_TURN_DEG = 25
+
+/** Drops vertices the path doubles back through, re-checking as it goes. */
+function dropBacktracks(points: LonLat[]): LonLat[] {
+  let out = points
+  for (let pass = 0; pass < 8; pass++) {
+    const keep = new Array<boolean>(out.length).fill(true)
+    let prev = 0
+    let dropped = 0
+    for (let i = 1; i < out.length - 1; i++) {
+      if (turnDeg(out[prev], out[i], out[i + 1]) > MAX_TURN_DEG) {
+        keep[i] = false
+        dropped++
+      } else {
+        prev = i
+      }
+    }
+    if (dropped === 0) return out
+    out = out.filter((_, i) => keep[i])
+    console.log(`  dropped ${dropped} backtracking centerline vertices (pass ${pass + 1})`)
+  }
+  throw new Error('centerline still backtracks after 8 cleanup passes — check the routed path')
+}
+
 function simplify(points: LonLat[], epsilonM: number, maxGapM: number): LonLat[] {
   const refLat = points[0][1]
   const xy = points.map((p) => toXY(p, refLat))
@@ -564,7 +614,7 @@ async function main() {
     nearestGraphNode([churchgateNode.lon, churchgateNode.lat]),
     nearestGraphNode([dahanuNode.lon, dahanuNode.lat]),
   )
-  let centerline = path.map((id) => nodeCoord.get(id)!)
+  let centerline = dropBacktracks(path.map((id) => nodeCoord.get(id)!))
   let chain = cumulative(centerline)
   console.log(`centerline: ${centerline.length} pts, ${(chain[chain.length - 1] / 1000).toFixed(1)} km`)
 
@@ -684,6 +734,15 @@ async function main() {
   const corridor = simplify(centerline, 2, 80).map(
     ([lon, lat]) => [Number(lon.toFixed(6)), Number(lat.toFixed(6))] as LonLat,
   )
+  for (let i = 1; i < corridor.length - 1; i++) {
+    const turn = turnDeg(corridor[i - 1], corridor[i], corridor[i + 1])
+    if (turn > MAX_BAKED_TURN_DEG) {
+      throw new Error(
+        `corridor turns ${turn.toFixed(0)} deg at vertex ${i} (${corridor[i].join(',')}) — ` +
+          `no real alignment does that; the routed path doubles back there`,
+      )
+    }
+  }
 
   // --- yards: centroid of each shed's OSM geometry, projected onto the
   // rebased centerline for a junction point + direction into the yard ---

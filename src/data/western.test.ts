@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { haversineM } from './geo'
+import { haversineM, type LonLat } from './geo'
 import type { NetworkData } from './network-types'
 import westernJson from './western.json'
 
@@ -154,6 +154,29 @@ describe('corridor geometry', () => {
       total += haversineM(network.corridor[i - 1], network.corridor[i])
     }
     expect(Math.abs(total - network.lengthM)).toBeLessThan(network.lengthM * 0.01)
+  })
+
+  // The routed path through the rail graph can visit two nodes out of order
+  // where crossovers link parallel ways — a real 173 deg hairpin sat 1.1 km
+  // south of Virar, and everything downstream of the corridor inherits it:
+  // every track offset from it, the ballast bed, and any train posed through
+  // it all wrapped back on themselves for ~50 m. No real alignment on this
+  // line turns more than ~10 deg between vertices ~77 m apart.
+  it('never doubles back on itself', () => {
+    const heading = (a: LonLat, b: LonLat) =>
+      Math.atan2(
+        (b[0] - a[0]) * Math.cos((a[1] * Math.PI) / 180),
+        b[1] - a[1],
+      )
+    for (let i = 1; i < network.corridor.length - 1; i++) {
+      const h1 = heading(network.corridor[i - 1], network.corridor[i])
+      const h2 = heading(network.corridor[i], network.corridor[i + 1])
+      let turn = h2 - h1
+      while (turn > Math.PI) turn -= 2 * Math.PI
+      while (turn < -Math.PI) turn += 2 * Math.PI
+      const deg = Math.abs((turn * 180) / Math.PI)
+      expect(deg, `turn at corridor point ${i} (${network.corridor[i]})`).toBeLessThan(25)
+    }
   })
 })
 

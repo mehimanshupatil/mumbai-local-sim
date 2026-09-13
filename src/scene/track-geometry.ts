@@ -47,6 +47,29 @@ function pointAt(points: [number, number][], lengths: number[], m: number): [num
   ]
 }
 
+/**
+ * Unit normal (left of travel) of the corridor at cumulative length m,
+ * averaged over +/-NORMAL_WINDOW_M.
+ *
+ * Taken from the corridor rather than from a finite difference over whatever
+ * vertex list a caller happens to hold: a section's own list is clipped at
+ * its boundaries, so the two sides of a boundary derived *different* normals
+ * from the same point, and lanes that are supposed to meet there missed each
+ * other by up to 4 m on a curve. Averaging also keeps a lane from inheriting
+ * the full kink of every native corridor vertex.
+ */
+const NORMAL_WINDOW_M = 25
+
+function normalAt(points: [number, number][], lengths: number[], m: number): [number, number] {
+  const total = lengths[lengths.length - 1]
+  const [ax, az] = pointAt(points, lengths, Math.max(0, m - NORMAL_WINDOW_M))
+  const [bx, bz] = pointAt(points, lengths, Math.min(total, m + NORMAL_WINDOW_M))
+  const dx = bx - ax
+  const dz = bz - az
+  const len = Math.hypot(dx, dz) || 1
+  return [-dz / len, dx / len]
+}
+
 /** Parallel copy of the polyline, offset by d metres to its left. */
 export function offsetPolyline(points: [number, number][], d: number): [number, number][] {
   return points.map((p, i) => {
@@ -460,14 +483,13 @@ export function buildTrackPolylines(
     const startMatch = prevSection ? matchBoundary(prevSection.tracks, section.tracks, spacingM) : null
     const endMatch = nextSection ? matchBoundary(section.tracks, nextSection.tracks, spacingM) : null
 
-    // Base vertices: one per sampling station (see sectionSampleStations —
-    // the ballast bed under these tracks samples the same stations).
-    const base = sectionSampleStations(sections, s, lengths, scale).map((m) =>
-      pointAt(centerline, lengths, m),
-    )
-    if (base.length < 2) continue
-    const baseLengths = cumulativeLength(base)
-    const baseTotal = baseLengths[baseLengths.length - 1]
+    // One base vertex per sampling station (see sectionSampleStations — the
+    // ballast bed under these tracks samples the same stations), each keeping
+    // its station so offsets and normals are measured along the corridor
+    // rather than along this section's own clipped chord.
+    const stations = sectionSampleStations(sections, s, lengths, scale)
+    if (stations.length < 2) continue
+    const base = stations.map((m) => pointAt(centerline, lengths, m))
 
     for (let t = 0; t < section.tracks; t++) {
       const staticOffset = centeredOffset(t, section.tracks, spacingM)
@@ -477,9 +499,8 @@ export function buildTrackPolylines(
       const endPair = endMatch?.matched.find((m) => m.prevIdx === t)
 
       const points = base.map((p, i) => {
-        const cumLen = baseLengths[i]
-        const dFromStart = cumLen
-        const dFromEnd = baseTotal - cumLen
+        const dFromStart = stations[i] - fromScene
+        const dFromEnd = toScene - stations[i]
         let offset = staticOffset
         if (startEntry && dFromStart < half) {
           const convergeOffset = startMatch!.nextConverge.get(t) ?? 0
@@ -496,12 +517,8 @@ export function buildTrackPolylines(
           const u = (half - dFromEnd) / (2 * half)
           offset = staticOffset + smoothstep(u) * (nextOffset - staticOffset)
         }
-        const prev = base[Math.max(0, i - 1)]
-        const next = base[Math.min(base.length - 1, i + 1)]
-        const dx = next[0] - prev[0]
-        const dy = next[1] - prev[1]
-        const len = Math.hypot(dx, dy) || 1
-        return [p[0] + (-dy / len) * offset, p[1] + (dx / len) * offset] as [number, number]
+        const [nx, nz] = normalAt(centerline, lengths, stations[i])
+        return [p[0] + nx * offset, p[1] + nz * offset] as [number, number]
       })
       out.push({ points })
     }
