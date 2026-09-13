@@ -4,7 +4,7 @@
  * follow mode) — kept in one place so a parked train's follow-camera and its
  * ballast can never drift from where it's actually rendered (ticket #17).
  */
-import type { NetworkData } from '../data/network-types'
+import type { NetworkData, TrackSection } from '../data/network-types'
 import { YARD_CAPACITY } from '../sim/simulate'
 import { TRACK_EXPRESS_DOWN, TRACK_EXPRESS_UP, TRACK_FAST_DOWN, TRACK_FAST_UP } from '../sim/types'
 import {
@@ -14,7 +14,7 @@ import {
   TRACK_SPACING_SCENE_M,
 } from './config'
 import type { Projection } from './projection'
-import { buildYardRoads, type TrainTrack } from './track-geometry'
+import { buildYardRoads, smoothstep, type TrainTrack } from './track-geometry'
 
 export const COACHES = 12
 export const RAKE_LEN = COACHES * (COACH_LENGTH_SCENE_M + COACH_GAP_SCENE_M) - COACH_GAP_SCENE_M
@@ -93,9 +93,53 @@ export function laneFor(track: number, sectionTracks: number): number {
   return Math.min(track, sectionTracks - 1)
 }
 
-/** Lateral offset of a drawn lane from the corridor centreline. */
+/** Lateral offset of a drawn lane from the corridor centreline, within one section. */
 export function laneLateralM(track: number, sectionTracks: number): number {
   return (laneFor(track, sectionTracks) - (sectionTracks - 1) / 2) * TRACK_SPACING_SCENE_M
+}
+
+/**
+ * Distance over which a rake slides from one section's lane to the next one's.
+ * 25 scene-m of shift across this reads as a turnout, not a swerve.
+ */
+const LANE_SHIFT_M = 400
+
+/**
+ * The same offset as a continuous function of chainage, so a rake slides
+ * between lanes instead of jumping between them.
+ *
+ * Taken straight from the section a train happens to be in, the offset is a
+ * step function: the moment its chainage crosses a boundary the whole rake
+ * jumps sideways by half a lane to a lane and a half. Nine of this line's
+ * stations sit *exactly* on a boundary — the bake derives section spans
+ * station to station — so a rake standing at one of those platforms is
+ * standing on the step, and the first metre it moves flips it onto another
+ * track.
+ *
+ * The shift therefore happens entirely within the lower-chainage section, on
+ * the approach to the boundary, rather than straddling it: at the boundary
+ * itself the rake is already fully on the next section's lane, which is the
+ * lane that section's platforms are drawn for. Centring the easing on the
+ * boundary instead leaves a dwelling rake parked half a lane off the track it
+ * is supposed to be standing on at all nine of those stations.
+ */
+export function laneLateralAtChainage(
+  sections: TrackSection[],
+  track: number,
+  chainageM: number,
+): number {
+  let idx = sections.findIndex((s) => chainageM < s.toM)
+  if (idx === -1) idx = sections.length - 1
+  const section = sections[idx]
+  const here = laneLateralM(track, section.tracks)
+  if (idx === sections.length - 1) return here
+  const shift = Math.min(LANE_SHIFT_M, section.toM - section.fromM)
+  const intoShift = chainageM - (section.toM - shift)
+  if (intoShift <= 0) return here
+  // Fully on the next section's lane by the boundary, so the two sides agree
+  // there and the offset is continuous across it.
+  const next = laneLateralM(track, sections[idx + 1].tracks)
+  return here + smoothstep(intoShift / shift) * (next - here)
 }
 
 /** Length of the cab nose capping each end of a rake. */

@@ -15,6 +15,7 @@ import {
   buildYardRoadTracks,
   COACHES,
   laneFor,
+  laneLateralAtChainage,
   NOSE_L,
   PARKED_RAKE_CHAINAGE_M,
   platformNoseOffsetM,
@@ -167,7 +168,7 @@ export function Fleet({
     }
     let n = 0
     let rake = 0
-    for (const { state, section, lane, nudge } of rakes) {
+    for (const { state, nudge } of rakes) {
       if (n >= MAX_RAKES * COACHES) break
       const livery = LIVERY[state.serviceType]
       // Parked rakes (ticket #17) pose on their own yard siding instead of
@@ -175,7 +176,7 @@ export function Fleet({
       const roads = state.parkedYardId ? yardRoads.get(state.parkedYardId) : undefined
       const yardTrack = roads ? roadForSlot(roads, state.parkedSlot) : undefined
       const track: TrainTrack = yardTrack ?? centerTrack
-      let lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M + nudge
+      let lateral = laneLateralAtChainage(sections, state.track, state.chainageM) + nudge
       let dirSign = state.direction === 'down' ? 1 : -1
       let trackChainageM = state.chainageM
       let refOffset = 0

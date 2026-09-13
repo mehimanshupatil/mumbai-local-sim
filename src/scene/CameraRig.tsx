@@ -8,7 +8,7 @@ import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import {
   buildYardRoadTracks,
-  laneLateralM,
+  laneLateralAtChainage,
   NOSE_L,
   PARKED_RAKE_CHAINAGE_M,
   platformNoseOffsetM,
@@ -16,7 +16,7 @@ import {
   roadForSlot,
 } from './rake-geometry'
 import { simClock } from './sim-clock'
-import { poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
+import { poseAt, type TrainTrack } from './track-geometry'
 
 /** Chase-cam geometry: behind and above the rake, whole train in frame. */
 const CHASE_BACK_M = 1100
@@ -137,7 +137,7 @@ export function CameraRig({
       // sits between tracks (see Fleet's lateral).
       const lateral = yardTrack
         ? 0
-        : laneLateralM(state.track, sectionAtChainage(network.sections, state.chainageM).tracks)
+        : laneLateralAtChainage(network.sections, state.track, state.chainageM)
       const offsetOf = (p: { x: number; z: number; angleRad: number }, m: number) => ({
         x: p.x + -Math.cos(p.angleRad) * m,
         z: p.z + Math.sin(p.angleRad) * m,

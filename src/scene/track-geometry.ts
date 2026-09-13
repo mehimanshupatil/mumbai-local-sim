@@ -289,7 +289,7 @@ function centeredOffset(t: number, tracks: number, spacingM: number): number {
   return (t - (tracks - 1) / 2) * spacingM
 }
 
-function smoothstep(x: number): number {
+export function smoothstep(x: number): number {
   const t = Math.max(0, Math.min(1, x))
   return t * t * (3 - 2 * t)
 }
