@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef } from 'react'
 import { Billboard } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { BufferAttribute, BufferGeometry, Vector3, type Group } from 'three'
+import { BufferStop } from './BufferStop'
 import type { NetworkData } from '../data/network-types'
 import { TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
@@ -25,13 +26,6 @@ const TRACK_WIDTH_SCENE_M = 13
  * config.ts's RENDER_EXAGGERATION comment).
  */
 const TRACK_TILE_LENGTH_SCENE_M = 60
-/** Buffer stop at the end of each Churchgate platform road. Sized to read
- * from the station camera rather than to scale, like the rest of the
- * trackside dressing. */
-const BUFFER_W = 16
-const BUFFER_H = 9
-const BUFFER_D = 5
-const BUFFER_COLOR = '#5a3a34'
 const STATION_COLOR = '#7b1fa2'
 const FAST_HALT_COLOR = '#e0a020'
 /** WRBoard's own text is sized for close-up reading (see StationDressing);
@@ -220,11 +214,8 @@ export function Corridor({
       ))}
       {/* One buffer stop per platform road, square across the rails — what a
           terminus ends in, and what tells the eye the line stops here. */}
-      {buffers.map(({ position: [x, y, z], angleRad }, i) => (
-        <mesh key={`buffer-${i}`} position={[x, y + BUFFER_H / 2, z]} rotation={[0, angleRad, 0]}>
-          <boxGeometry args={[BUFFER_W, BUFFER_H, BUFFER_D]} />
-          <meshStandardMaterial color={BUFFER_COLOR} roughness={0.85} />
-        </mesh>
+      {buffers.map(({ position, angleRad }, i) => (
+        <BufferStop key={`buffer-${i}`} position={position} angleRad={angleRad} />
       ))}
       {network.stations.map((s, i) => (
         <StationMarker

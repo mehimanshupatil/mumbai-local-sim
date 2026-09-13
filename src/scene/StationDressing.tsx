@@ -16,6 +16,7 @@ import type { NetworkData } from '../data/network-types'
 import { IS_COARSE_POINTER, PLATFORM_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
+import { buildYardRoadTracks } from './rake-geometry'
 import {
   buildTrainTrack,
   corridorSampleStations,
@@ -81,6 +82,13 @@ const LAMP_HEIGHT = 12
 /** Buildings with any lights on at all — the rest stay dark, so the city
  * doesn't read as uniformly occupied at 03:00. */
 const LIT_BUILDING_SHARE = 0.72
+/**
+ * Clear ground either side of a yard's stabling roads. The building scatter
+ * starts just outside the platforms and runs 700 m out, which is exactly
+ * where the roads are — so blocks were landing on top of them, and a yard
+ * read as a car shed inside an office park.
+ */
+const YARD_CLEAR_M = 45
 
 /** Deterministic PRNG so the city never reshuffles between loads. */
 function mulberry32(seed: number) {
@@ -294,6 +302,16 @@ export function StationDressing({
     }
   })
 
+  // Every stabling road's vertices, to keep the scatter off them (see
+  // YARD_CLEAR_M). Flat array so the per-candidate test is a plain scan.
+  const yardRoadPoints = useMemo(() => {
+    const out: [number, number][] = []
+    for (const roads of buildYardRoadTracks(network, projection, track).values()) {
+      for (const road of roads) out.push(...road.points)
+    }
+    return out
+  }, [network, projection, track])
+
   // Sparse procedural blocks around each station, off the rail corridor.
   const buildingInstances = useMemo(() => {
     const matrices: Matrix4[] = []
@@ -336,6 +354,8 @@ export function StationDressing({
         const w = 40 + rand() * 50
         const h = 25 + rand() * 65
         const d = 40 + rand() * 50
+        const clear = Math.hypot(w, d) / 2 + YARD_CLEAR_M
+        if (yardRoadPoints.some((p) => Math.hypot(p[0] - x, p[1] - z) < clear)) continue
         q.setFromAxisAngle(up, s.angleRad + (rand() - 0.5) * 0.4)
         matrices.push(
           new Matrix4().compose(new Vector3(x, ground + h / 2, z), q.clone(), new Vector3(w, h, d)),
@@ -375,7 +395,7 @@ export function StationDressing({
       }
     })
     return { matrices, colors, windows, lamps }
-  }, [stations, heightfield])
+  }, [stations, heightfield, yardRoadPoints])
 
   return (
     <group>

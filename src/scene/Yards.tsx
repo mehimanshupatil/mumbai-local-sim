@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { NetworkData } from '../data/network-types'
+import { BufferStop } from './BufferStop'
 import { trackRibbonGeometry } from './Corridor'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
@@ -13,6 +14,8 @@ const SIDING_LIFT = 0.5
  * is the same gauge but reads as secondary track when drawn thinner. */
 const SIDING_WIDTH_SCENE_M = 9
 const SIDING_COLOR = '#4a3f38' // weathered ballast, unlit — no sleeper texture
+/** Narrower than the running lines' buffers, to match the thinner siding. */
+const SIDING_BUFFER_W = 11
 
 /**
  * A yard's stabling roads (ticket #17). One ribbon per road, following the
@@ -32,19 +35,32 @@ export function Yards({
   /** The corridor centreline the roads are laid out against. */
   track: TrainTrack
 }) {
-  const geometries = useMemo(() => {
+  const { geometries, buffers } = useMemo(() => {
     const roadsByYard = buildYardRoadTracks(network, projection, track)
-    return [...roadsByYard].flatMap(([yardId, roads]) =>
-      roads.map((road, i) => ({
-        key: `${yardId}-${i}`,
-        geo: trackRibbonGeometry(
-          road.points.map(
-            ([x, z]) => [x, heightfield.railY(x, z) + SIDING_LIFT, z] as [number, number, number],
+    const entries = [...roadsByYard].flatMap(([yardId, roads]) =>
+      roads.map((road, i) => {
+        const points = road.points
+        const [ex, ez] = points[points.length - 1]
+        const [px, pz] = points[points.length - 2] ?? points[0]
+        return {
+          key: `${yardId}-${i}`,
+          geo: trackRibbonGeometry(
+            points.map(
+              ([x, z]) => [x, heightfield.railY(x, z) + SIDING_LIFT, z] as [number, number, number],
+            ),
+            SIDING_WIDTH_SCENE_M,
           ),
-          SIDING_WIDTH_SCENE_M,
-        ),
-      })),
+          // A stabling road is a dead end like the terminus is; without the
+          // buffer it just stops in the grass.
+          buffer: {
+            key: `${yardId}-${i}`,
+            position: [ex, heightfield.railY(ex, ez), ez] as [number, number, number],
+            angleRad: Math.atan2(ex - px, ez - pz),
+          },
+        }
+      }),
     )
+    return { geometries: entries, buffers: entries.map((e) => e.buffer) }
   }, [network, projection, heightfield, track])
   return (
     <group>
@@ -52,6 +68,14 @@ export function Yards({
         <mesh key={key} geometry={geo}>
           <meshStandardMaterial color={SIDING_COLOR} roughness={1} />
         </mesh>
+      ))}
+      {buffers.map(({ key, position, angleRad }) => (
+        <BufferStop
+          key={`buffer-${key}`}
+          position={position}
+          angleRad={angleRad}
+          width={SIDING_BUFFER_W}
+        />
       ))}
     </group>
   )
