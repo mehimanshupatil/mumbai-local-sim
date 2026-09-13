@@ -46,3 +46,10 @@ The rule self-corrects when a Section's Track count changes, and it carries to
 a new Route with no new data to source. Platform *numbering* is explicitly out
 of scope — real numbers include lettered Faces such as 1A, 3A and 5A, so any
 future numbering work must model them as strings, not integers.
+
+That exclusion governs the audio layer too. A real platform Announcement names
+a platform number, and ours does not: a voice saying "platform number three"
+is a far stronger claim of fact than a slab drawn on screen, so inventing one
+for the PA would be this ADR's own error made louder. Announcements name the
+time, the destination and the Service Type — all of which the data actually
+holds — and stop there. See ADR 0002.

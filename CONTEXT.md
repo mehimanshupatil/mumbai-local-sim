@@ -112,3 +112,28 @@ _Avoid_: gap, spacing, interval
 Time added to a Service against its published schedule so that a minimum
 Headway is preserved.
 _Avoid_: delay (reserved for unscheduled lateness), wait
+
+### Sound
+
+**Cue**:
+A single audio event the Timetable calls for, decided in the simulation core
+from clock time alone.
+_Avoid_: trigger, sfx, event
+
+**Bed**:
+The continuous ambient layer under everything, belonging to the hour and the
+Route rather than to any place in it.
+_Avoid_: ambience, background, loop
+
+**Announcement**:
+Speech heard on a Platform Face, naming a Service calling there.
+_Avoid_: PA, broadcast, tannoy
+
+**Callout**:
+Speech heard inside a Rake, naming the Halt it is running toward.
+_Avoid_: onboard announcement, in-train announcement
+
+**Phrase Bank**:
+The baked fragments — Station names, times, Service Types, connecting
+words — that Announcements and Callouts are assembled from.
+_Avoid_: voice pack, samples, clips
