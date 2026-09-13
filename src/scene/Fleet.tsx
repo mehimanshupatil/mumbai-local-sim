@@ -18,9 +18,15 @@ import {
 } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { COACHES, parkedSlotChainageM, RAKE_LEN } from './rake-geometry'
+import {
+  buildYardRoadTracks,
+  COACHES,
+  PARKED_RAKE_CHAINAGE_M,
+  RAKE_LEN,
+  roadForSlot,
+} from './rake-geometry'
 import { simClock } from './sim-clock'
-import { buildTrainTrack, buildYardTrack, poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
+import { buildTrainTrack, poseAt, sectionAtChainage, type TrainTrack } from './track-geometry'
 
 const BODY_W = 18
 const BODY_H = 18
@@ -144,9 +150,9 @@ export function Fleet({
   const rakeIds = useRef<string[]>([])
 
   const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
-  const yardTracks = useMemo(
-    () => new Map(network.yards.map((y) => [y.id, buildYardTrack(y, projection)] as const)),
-    [network, projection],
+  const yardRoads = useMemo(
+    () => buildYardRoadTracks(network, projection, centerTrack),
+    [network, projection, centerTrack],
   )
   const sections = network.sections
   const stationChainageById = useMemo(
@@ -219,16 +225,17 @@ export function Fleet({
       const livery = LIVERY[state.serviceType]
       // Parked rakes (ticket #17) pose on their own yard siding instead of
       // the corridor: a fixed nose-to-tail slot, no platform/lane geometry.
-      const yardTrack = state.parkedYardId ? yardTracks.get(state.parkedYardId) : undefined
+      const roads = state.parkedYardId ? yardRoads.get(state.parkedYardId) : undefined
+      const yardTrack = roads ? roadForSlot(roads, state.parkedSlot) : undefined
       const track: TrainTrack = yardTrack ?? centerTrack
       let lateral = (lane - (section.tracks - 1) / 2) * TRACK_SPACING_SCENE_M + nudge
       let dirSign = state.direction === 'down' ? 1 : -1
       let trackChainageM = state.chainageM
       let refOffset = 0
       if (yardTrack) {
-        lateral = 0
+        lateral = 0 // the road itself is already offset; see rake-geometry
         dirSign = 1 // nose points from the junction into the yard
-        trackChainageM = parkedSlotChainageM(state.parkedSlot)
+        trackChainageM = PARKED_RAKE_CHAINAGE_M
       } else {
         // TrainState.chainageM is the rake's leading edge while moving (correct
         // for a real train's front relative to signals/platforms) — but while

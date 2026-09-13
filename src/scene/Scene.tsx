@@ -102,7 +102,12 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
             night={daylight.night}
             onSelectStation={(stationId) => onFocus({ mode: 'station', stationId })}
           />
-          <Yards network={network} projection={projection} heightfield={heightfield} />
+          <Yards
+            network={network}
+            projection={projection}
+            heightfield={heightfield}
+            track={centerTrack}
+          />
           <Bridges network={network} projection={projection} heightfield={heightfield} />
           <Wayside network={network} projection={projection} heightfield={heightfield} />
           <SimClockDriver />

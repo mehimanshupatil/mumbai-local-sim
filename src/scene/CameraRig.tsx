@@ -6,9 +6,9 @@ import type { NetworkData } from '../data/network-types'
 import { trainStates, type Timetable } from '../sim/simulate'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { parkedSlotChainageM } from './rake-geometry'
+import { buildYardRoadTracks, PARKED_RAKE_CHAINAGE_M, roadForSlot } from './rake-geometry'
 import { simClock } from './sim-clock'
-import { buildYardTrack, poseAt, type TrainTrack } from './track-geometry'
+import { poseAt, type TrainTrack } from './track-geometry'
 
 /** Chase-cam geometry: behind and above the rake, whole train in frame. */
 const CHASE_BACK_M = 1100
@@ -52,9 +52,9 @@ export function CameraRig({
 }) {
   const landed = useRef(false)
   const lastFocusRef = useRef<Focus>(focus)
-  const yardTracks = useMemo(
-    () => new Map(network.yards.map((y) => [y.id, buildYardTrack(y, projection)] as const)),
-    [network, projection],
+  const yardRoads = useMemo(
+    () => buildYardRoadTracks(network, projection, track),
+    [network, projection, track],
   )
 
   // Only the followed service's timetable is simulated per frame.
@@ -84,9 +84,10 @@ export function CameraRig({
       // A yard-parked rake (ticket #17) renders on its own siding, not the
       // main corridor at its old chainage — chase it there instead, or the
       // camera would settle on empty track while the train sits elsewhere.
-      const yardTrack = state.parkedYardId ? yardTracks.get(state.parkedYardId) : undefined
+      const roads = state.parkedYardId ? yardRoads.get(state.parkedYardId) : undefined
+      const yardTrack = roads ? roadForSlot(roads, state.parkedSlot) : undefined
       const chaseTrack = yardTrack ?? track
-      const chaseChainageM = yardTrack ? parkedSlotChainageM(state.parkedSlot) : state.chainageM
+      const chaseChainageM = yardTrack ? PARKED_RAKE_CHAINAGE_M : state.chainageM
       const pose = poseAt(chaseTrack, chaseChainageM)
       const y = heightfield.railY(pose.x, pose.z)
       // Chase from behind the direction of travel.

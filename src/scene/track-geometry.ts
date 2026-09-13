@@ -85,18 +85,103 @@ export function buildTrainTrack(
   return { points, lengths, scale: lengths[lengths.length - 1] / network.lengthM }
 }
 
+/** Where a scene-space point lands on a track: distance along, offset across. */
+export function projectOnTrack(
+  track: TrainTrack,
+  x: number,
+  z: number,
+): { alongM: number; lateralM: number } {
+  const { points, lengths } = track
+  let bestD2 = Infinity
+  let alongM = 0
+  let lateralM = 0
+  for (let i = 1; i < points.length; i++) {
+    const [ax, az] = points[i - 1]
+    const [bx, bz] = points[i]
+    const dx = bx - ax
+    const dz = bz - az
+    const len2 = dx * dx + dz * dz || 1
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2))
+    const px = ax + t * dx
+    const pz = az + t * dz
+    const d2 = (x - px) ** 2 + (z - pz) ** 2
+    if (d2 >= bestD2) continue
+    const len = Math.sqrt(len2)
+    bestD2 = d2
+    alongM = lengths[i - 1] + t * len
+    // Same normal convention as offsetPolyline: left of travel = (-dz, dx).
+    lateralM = ((x - px) * -dz + (z - pz) * dx) / len
+  }
+  return { alongM, lateralM }
+}
+
+export interface YardRoadOptions {
+  /** Parallel stabling roads to lay out, one rake each. */
+  roads: number
+  /** Centre-to-centre gap between roads — the running lines' own spacing. */
+  spacingM: number
+  /** Clear strip between the outermost running lane and the first road. */
+  clearanceM: number
+  /** Length of the throat each road peels off the running lines along. */
+  throatM: number
+  /** Straight stabling length past the throat. */
+  roadM: number
+  /** Sampling step; the roads follow the corridor's curve, so this has to be
+   * fine enough to read as a curve rather than a chord. */
+  stepM?: number
+}
+
 /**
- * A yard siding as a posable track (ticket #17) — same TrainTrack shape as
- * the corridor so poseAt works unmodified, but "chainage" here is just
- * metres from the junction (siding[0]), not baked corridor chainage, so
- * scale is 1. Only two points in the baked data (junction + far end), but
- * poseAt already extrapolates past a track's ends along its tangent, so a
- * rake parked further in than the drawn siding still renders in a straight
- * line rather than breaking.
+ * A yard's stabling roads (ticket #17): a fan of parallel sidings peeling off
+ * the running lines on whichever side the shed actually sits, one rake to a
+ * road, each a posable TrainTrack whose "chainage" is metres from its own
+ * start rather than baked corridor chainage (hence scale 1).
+ *
+ * The baked record holds only the shed's near and far points, and drawing the
+ * straight line between them put the siding *through* the running lines: the
+ * corridor curves away from that chord (by 44 m over Mumbai Central's siding,
+ * 90 m over Bhayandar's), and the running fan is laterally exaggerated 5x (see
+ * config.ts) while a baked shed offset is true-scale, so a real 50 m clearance
+ * renders as none at all. Both are fixed by deriving the roads from the
+ * corridor itself — offset along its own normals, and pushed out far enough to
+ * clear the exaggerated fan — instead of from the two baked points, which now
+ * only say which side of the line the shed is on and which way it runs.
  */
-export function buildYardTrack(yard: YardRecord, projection: Projection): TrainTrack {
-  const points = yard.siding.map(projection.toScene)
-  return { points, lengths: cumulativeLength(points), scale: 1 }
+export function buildYardRoads(
+  yard: YardRecord,
+  projection: Projection,
+  corridor: TrainTrack,
+  sections: TrackSection[],
+  opts: YardRoadOptions,
+): TrainTrack[] {
+  const [nearX, nearZ] = projection.toScene(yard.siding[0])
+  const [farX, farZ] = projection.toScene(yard.siding[1])
+  const near = projectOnTrack(corridor, nearX, nearZ)
+  const far = projectOnTrack(corridor, farX, farZ)
+  const dirSign = far.alongM >= near.alongM ? 1 : -1
+  const side = near.lateralM >= 0 ? 1 : -1
+  const tracksHere = sectionAtChainage(sections, near.alongM / corridor.scale).tracks
+  const outerLaneM = ((tracksHere - 1) / 2) * opts.spacingM
+  const firstRoadM = Math.max(Math.abs(near.lateralM), outerLaneM + opts.clearanceM)
+  const totalM = opts.throatM + opts.roadM
+  const step = opts.stepM ?? 25
+  const roads: TrainTrack[] = []
+  for (let r = 0; r < opts.roads; r++) {
+    const targetM = firstRoadM + r * opts.spacingM
+    const points: [number, number][] = []
+    for (let s = 0; ; s = Math.min(totalM, s + step)) {
+      const pose = poseAt(corridor, (near.alongM + dirSign * s) / corridor.scale)
+      const nx = -Math.cos(pose.angleRad)
+      const nz = Math.sin(pose.angleRad)
+      // Eased across the throat so a road diverges as a curve off the
+      // running lines, the same shape as a section boundary's turnout.
+      const lateral = side * (outerLaneM + smoothstep(s / opts.throatM) * (targetM - outerLaneM))
+      points.push([pose.x + nx * lateral, pose.z + nz * lateral])
+      if (s >= totalM) break
+    }
+    roads.push({ points, lengths: cumulativeLength(points), scale: 1 })
+  }
+  return roads
 }
 
 export interface TrackPose {
