@@ -273,6 +273,8 @@ body {
   background: rgba(13, 17, 26, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.14);
   color: #c6cdd8;
+  /* The bar sits over the scene as a caption, so drags pass through it to the
+     camera — but its buttons have to take clicks (see .follow-views). */
   pointer-events: none;
 }
 
@@ -485,6 +487,10 @@ body {
   gap: 4px;
   margin-right: 10px;
   vertical-align: middle;
+  /* Re-enabled against .follow-hint's pointer-events: none. Without this the
+     click falls through to the canvas, which reads it as a click on empty
+     space and releases the follow — so the view buttons did nothing. */
+  pointer-events: auto;
 }
 
 .follow-view {

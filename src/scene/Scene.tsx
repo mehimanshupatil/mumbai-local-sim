@@ -80,6 +80,10 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
       }}
       onPointerDown={(e) => (pointerDownAt.current = [e.clientX, e.clientY])}
       onPointerMissed={(e) => {
+        // Only a click on the canvas itself is a click on empty space. An
+        // overlay that takes its own clicks still reaches here, and releasing
+        // the focus underneath it undoes whatever the overlay just did.
+        if (!(e.target instanceof HTMLCanvasElement)) return
         // A drag that ends off-target is navigation, not a click-away.
         const d = pointerDownAt.current
         if (d && Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 8) return
