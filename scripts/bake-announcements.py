@@ -232,6 +232,28 @@ def synthesise(voice: PiperVoice, cfg: SynthesisConfig, text: str) -> np.ndarray
     return np.concatenate([c.audio_float_array for c in chunks])
 
 
+# Piper pads every utterance with a little silence at each end. Harmless for a
+# whole sentence, ruinous for fragments: eleven fragments carry eleven pairs of
+# pauses, and a two-language announcement runs twenty seconds when it should
+# run twelve. Trim to where the speech actually starts and stops, keeping a
+# hair either side so nothing is clipped.
+TRIM_THRESHOLD = 0.015
+TRIM_PAD_S = 0.02
+
+
+def trim_silence(samples: np.ndarray) -> np.ndarray:
+    peak = float(np.max(np.abs(samples)))
+    if peak <= 0:
+        return samples
+    loud = np.flatnonzero(np.abs(samples) > TRIM_THRESHOLD * peak)
+    if loud.size == 0:
+        return samples
+    pad = int(TRIM_PAD_S * SAMPLE_RATE)
+    start = max(0, int(loud[0]) - pad)
+    end = min(len(samples), int(loud[-1]) + pad)
+    return samples[start:end]
+
+
 def to_int16(samples: np.ndarray) -> np.ndarray:
     # Normalise each fragment to the same peak: fragments are cut apart and
     # recombined in orders the voice never actually spoke, and one loud word in
@@ -265,7 +287,7 @@ def bake_language(lang: str, stations: list[dict]) -> dict:
     index: dict[str, list[float]] = {}
     at = 0
     for key in sorted(wanted):
-        audio = to_int16(synthesise(voice, cfg, wanted[key]))
+        audio = to_int16(trim_silence(synthesise(voice, cfg, wanted[key])))
         index[key] = [round(at / SAMPLE_RATE, 4), round(len(audio) / SAMPLE_RATE, 4)]
         pieces.append(audio)
         pieces.append(gap)

@@ -1,20 +1,32 @@
 /**
  * Mounts the sound layer inside the Canvas: puts the listener on the camera,
- * keeps the Bed following the hour and the traffic, and answers for what is
- * audible from the console.
+ * keeps the Bed following the hour and the traffic, and speaks the Cues the
+ * sim hands over.
  *
- * Nothing here plays a discrete Cue — those arrive in #31 and #32 through
- * onCue and the voice budget. This is the part that has to exist first.
+ * Announcements are positional, at the Platform Face. That is the whole rule —
+ * there is no "which Station announces" logic anywhere, because distance does
+ * the filtering: a Station three kilometres away is inaudible, and walking the
+ * camera down the Corridor passes out of one Station's PA and into the next.
+ *
+ * Callouts are the opposite. They are heard inside the Rake, so they play only
+ * while riding one — cab or chase — and are silent from the lineside, where
+ * you are standing outside the train watching it go by.
  */
 import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
+import type { Focus } from '../app-data'
+import type { NetworkData } from '../data/network-types'
+import type { Cue } from '../sim/cues'
+import { sectionAtChainage } from '../sim/lines'
 import { trainStates, type Timetable } from '../sim/simulate'
 import { audioGraph, ensureListener, loadedClips, sound } from './audio'
 import { Bed } from './bed'
-import { simAudio } from './sim-audio'
+import { trackLateralM } from './rake-geometry'
+import { noteSpeech, onCue, simAudio } from './sim-audio'
 import { simClock } from './sim-clock'
-import { projectOnTrack, type TrainTrack } from './track-geometry'
-import { liveVoices, stopAllVoices } from './voices'
+import { isSpoken, loadPhraseBank, phraseBankReady, renderUtterance } from './speech'
+import { poseAt, projectOnTrack, type TrainTrack } from './track-geometry'
+import { liveVoices, playVoice, stopAllVoices } from './voices'
 
 /**
  * How far along the corridor counts as "here" when weighing how busy it
@@ -27,16 +39,35 @@ const EARSHOT_M = 3000
 /** The Bed has nothing that moves faster than this; per-frame would be waste. */
 const UPDATE_INTERVAL_S = 0.5
 
+/**
+ * Beyond this a Station's PA is not worth a voice slot. Not a hearing limit —
+ * the rolloff has it near-inaudible well before here — but a budget one: an
+ * Announcement runs ten seconds or more, and six slots held by Stations
+ * kilometres away is a platform standing silent while distant ones mumble.
+ */
+const ANNOUNCE_RANGE_M = 2200
+
+/** A PA is loud; a Callout is a speaker above your head in a moving coach. */
+const ANNOUNCE_VOLUME = 1
+const CALLOUT_VOLUME = 0.85
+
 export function AudioRig({
+  network,
   timetables,
   track,
+  focus,
 }: {
+  network: NetworkData
   timetables: Timetable[]
   track: TrainTrack
+  focus: Focus
 }) {
   const camera = useThree((state) => state.camera)
   const bed = useRef<Bed | null>(null)
   const sinceUpdate = useRef(0)
+  // Read inside the Cue callback, which outlives any one render.
+  const focusRef = useRef(focus)
+  focusRef.current = focus
 
   useEffect(() => {
     const sync = () => {
@@ -47,10 +78,13 @@ export function AudioRig({
         return
       }
       const listener = ensureListener(camera)
-      if (!bed.current) {
-        const graph = audioGraph()
-        if (graph) bed.current = new Bed(graph.ctx, listener.getInput())
-      }
+      const graph = audioGraph()
+      if (!graph) return
+      if (!bed.current) bed.current = new Bed(graph.ctx, listener.getInput())
+      // Two requests for the entire PA, and only once sound is on.
+      void loadPhraseBank(graph.ctx, import.meta.env.BASE_URL).catch((err) =>
+        console.error('phrase bank failed to load, the PA stays silent:', err),
+      )
     }
     sync()
     return sound.watch(sync)
@@ -63,6 +97,51 @@ export function AudioRig({
       stopAllVoices()
     }
   }, [])
+
+  useEffect(
+    () =>
+      onCue((cue) => {
+        if (sound.muted || !isSpoken(cue.kind) || !phraseBankReady()) return
+        const graph = audioGraph()
+        if (!graph) return
+        const spot = cue.faceTrack === null ? null : facePosition(network, track, cue)
+        const followed = focusRef.current
+        const riding =
+          followed.mode === 'follow' &&
+          followed.trainId === cue.serviceId &&
+          (followed.view ?? 'chase') !== 'lineside'
+
+        if (spot) {
+          const distance = Math.hypot(camera.position.x - spot[0], camera.position.z - spot[2])
+          if (distance > ANNOUNCE_RANGE_M) return
+          const buffer = renderUtterance(graph.ctx, cue)
+          if (!buffer) return
+          const played = playVoice({
+            buffer,
+            position: spot,
+            distance,
+            volume: ANNOUNCE_VOLUME,
+            keep: riding,
+          })
+          noteSpeech(cue, buffer.duration, distance, played)
+          return
+        }
+        // A Callout is heard from inside the Rake, so it has no position — and
+        // no reason to play at all unless the viewer is in that Rake.
+        if (!riding) return
+        const buffer = renderUtterance(graph.ctx, cue)
+        if (!buffer) return
+        const played = playVoice({
+          buffer,
+          position: null,
+          distance: 0,
+          volume: CALLOUT_VOLUME,
+          keep: true,
+        })
+        noteSpeech(cue, buffer.duration, 0, played)
+      }),
+    [camera, network, track],
+  )
 
   useFrame((_, delta) => {
     sinceUpdate.current += delta
@@ -81,11 +160,29 @@ export function AudioRig({
       if (state.parkedYardId) continue
       if (Math.abs(state.chainageM - here) <= EARSHOT_M) nearby++
     }
-    const hour = ((simClock.t / 3600) % 24 + 24) % 24
+    const hour = (((simClock.t / 3600) % 24) + 24) % 24
     bed.current.update(hour, nearby)
     simAudio.nearby = nearby
     simAudio.hour = hour
   })
 
   return null
+}
+
+/**
+ * Where an Announcement comes from: the Platform Face itself, beside the Track
+ * the Service is booked on, rather than a point at the middle of the Station.
+ * On a six-Track Section the far Face is 125 scene metres across, which is
+ * audible as a pan when the camera stands between them.
+ */
+function facePosition(
+  network: NetworkData,
+  track: TrainTrack,
+  cue: Cue,
+): [number, number, number] {
+  const pose = poseAt(track, cue.chainageM)
+  const tracks = sectionAtChainage(network.sections, cue.chainageM).tracks
+  const lateral = trackLateralM(cue.faceTrack ?? 0, tracks)
+  // Same normal convention as the track geometry: left of travel.
+  return [pose.x - Math.cos(pose.angleRad) * lateral, 0, pose.z + Math.sin(pose.angleRad) * lateral]
 }

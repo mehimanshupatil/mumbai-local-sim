@@ -70,6 +70,38 @@ describe('the Phrase Bank', () => {
     }
   })
 
+  it('has no word for a platform number, in any language', () => {
+    // ADR 0001 keeps Face numbering out of scope, and a voice saying "platform
+    // number three" claims far more than a slab drawn on screen does. The
+    // guarantee is that the words do not exist to be said.
+    for (const [lang, data] of languages) {
+      for (const key of Object.keys(data.fragments)) {
+        expect(key.toLowerCase(), lang).not.toContain('platform')
+      }
+      for (const tokens of Object.values(data.templates)) {
+        for (const token of tokens) expect(token.toLowerCase(), lang).not.toContain('platform')
+      }
+    }
+  })
+
+  it('can say every spoken Cue in both languages', () => {
+    // Marathi then English, every time — so a Cue with a template in one
+    // language and not the other would be half an announcement.
+    const spoken = [
+      'announce-approach',
+      'announce-departure',
+      'callout-departure',
+      'callout-approach',
+      'callout-terminus',
+    ]
+    for (const [lang, data] of languages) {
+      for (const kind of spoken) {
+        expect(data.templates[kind], `${lang}: ${kind}`).toBeDefined()
+        expect(data.templates[kind].length, `${lang}: ${kind}`).toBeGreaterThan(1)
+      }
+    }
+  })
+
   it('lays its fragments out in one sprite, in order and without overlap', () => {
     for (const [lang, data] of languages) {
       const spans = Object.values(data.fragments).sort((a, b) => a[0] - b[0])

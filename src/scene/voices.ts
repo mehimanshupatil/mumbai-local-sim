@@ -39,8 +39,11 @@ const voices = new Set<Voice>()
 
 export interface VoiceRequest {
   buffer: AudioBuffer
-  /** Where it happens, in scene space. */
-  position: [number, number, number]
+  /**
+   * Where it happens, in scene space — or null for a sound heard from inside
+   * the train you are riding, which has no position relative to you.
+   */
+  position: [number, number, number] | null
   /** Distance from the listener, which the caller already knows. */
   distance: number
   /** True for the followed Service: exempt from culling. */
@@ -59,21 +62,26 @@ export function playVoice(req: VoiceRequest): boolean {
   if (voices.size >= VOICE_BUDGET && !makeRoom(req)) return false
 
   const { ctx, input } = graph
-  const panner = ctx.createPanner()
-  panner.panningModel = 'HRTF'
-  panner.distanceModel = 'inverse'
-  panner.refDistance = REF_DISTANCE
-  panner.maxDistance = MAX_DISTANCE
-  panner.rolloffFactor = ROLLOFF
-  panner.positionX.value = req.position[0]
-  panner.positionY.value = req.position[1]
-  panner.positionZ.value = req.position[2]
+  let panner: PannerNode | null = null
+  if (req.position) {
+    panner = ctx.createPanner()
+    panner.panningModel = 'HRTF'
+    panner.distanceModel = 'inverse'
+    panner.refDistance = REF_DISTANCE
+    panner.maxDistance = MAX_DISTANCE
+    panner.rolloffFactor = ROLLOFF
+    panner.positionX.value = req.position[0]
+    panner.positionY.value = req.position[1]
+    panner.positionZ.value = req.position[2]
+  }
 
   const gain = ctx.createGain()
   gain.gain.value = req.volume ?? 1
   const source = ctx.createBufferSource()
   source.buffer = req.buffer
-  source.connect(gain).connect(panner).connect(input)
+  source.connect(gain)
+  if (panner) gain.connect(panner).connect(input)
+  else gain.connect(input)
 
   const voice: Voice = { source, gain, distance: req.distance, keep: req.keep === true }
   voices.add(voice)
@@ -82,7 +90,7 @@ export function playVoice(req: VoiceRequest): boolean {
     try {
       source.disconnect()
       gain.disconnect()
-      panner.disconnect()
+      panner?.disconnect()
     } catch {
       // Already torn down by a cull; nothing to do.
     }

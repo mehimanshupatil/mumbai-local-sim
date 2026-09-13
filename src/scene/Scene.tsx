@@ -138,7 +138,12 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
           <Wayside network={network} projection={projection} heightfield={heightfield} />
           <SimClockDriver />
           <CueDriver />
-          <AudioRig timetables={timetables} track={centerTrack} />
+          <AudioRig
+            network={network}
+            timetables={timetables}
+            track={centerTrack}
+            focus={focus}
+          />
           <Fleet
             network={network}
             projection={projection}

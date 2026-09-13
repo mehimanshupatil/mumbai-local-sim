@@ -68,6 +68,18 @@ export const simAudio = {
   nearby: 0,
   hour: 0,
 
+  /** Speech this run: what was said, how long it ran, and whether it got a slot. */
+  spoken: 0,
+  lastSpeech: null as null | {
+    kind: string
+    serviceId: string
+    stationId: string
+    faceTrack: number | null
+    seconds: number
+    distance: number
+    played: boolean
+  },
+
   /**
    * What is actually coming out, as RMS over a short sample. Sound is the one
    * layer with nothing to look at, so this is the equivalent of a screenshot:
@@ -164,3 +176,21 @@ export function CueDriver() {
 let lastT = simClock.t
 
 if (import.meta.env.DEV && typeof window !== 'undefined') window.simAudio = simAudio
+
+/**
+ * Record what the PA just said, for the console. Audio leaves no trace on
+ * screen, so without this there is no way to check that the right Service
+ * announced at the right Face at the right second.
+ */
+export function noteSpeech(cue: Cue, seconds: number, distance: number, played: boolean): void {
+  if (played) simAudio.spoken++
+  simAudio.lastSpeech = {
+    kind: cue.kind,
+    serviceId: cue.serviceId,
+    stationId: cue.stationId,
+    faceTrack: cue.faceTrack,
+    seconds: Math.round(seconds * 100) / 100,
+    distance: Math.round(distance),
+    played,
+  }
+}
