@@ -82,4 +82,5 @@ datasets, not new code. See `CLAUDE.md` for conventions.
 - Terrain: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (terrarium)
 - Timetable: Western Railway Public Time Tables, PTT 79, W.E.F. 01.09.2026 (`data/timetable/`)
 - Fonts: Noto Sans / Noto Sans Devanagari ([OFL](public/fonts/OFL.txt))
+- Ambient sound: CC-BY field recordings from [Freesound](https://freesound.org/), most of them recorded in India — every clip credited in [`docs/attribution.md`](docs/attribution.md)
 - Station metadata for kinematics calibration: `data/` (third-party, reference only)

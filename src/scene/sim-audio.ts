@@ -10,7 +10,9 @@
 import { useFrame } from '@react-three/fiber'
 import { cueStream } from '../app-data'
 import { cuesBetween, type Cue } from '../sim/cues'
+import { audioGraph, sound } from './audio'
 import { simClock } from './sim-clock'
+import { playVoice, VOICE_BUDGET } from './voices'
 
 export type CueListener = (cue: Cue) => void
 
@@ -53,6 +55,61 @@ export const simAudio = {
   ready: () => stream !== null,
   /** Everything the service day calls for, built on demand. */
   stream: () => cueStream(),
+
+  /** Sound on or off, same switch as the speaker button. */
+  muted: () => sound.muted,
+  setMuted: (muted: boolean) => sound.setMuted(muted),
+  /** Positional sounds alive right now, against the budget. */
+  voices: 0,
+  budget: VOICE_BUDGET,
+  /** Audio assets fetched so far — zero until the first unmute, by design. */
+  clips: 0,
+  /** What the Bed is answering to: Services within earshot, and the sim hour. */
+  nearby: 0,
+  hour: 0,
+
+  /**
+   * What is actually coming out, as RMS over a short sample. Sound is the one
+   * layer with nothing to look at, so this is the equivalent of a screenshot:
+   * it answers "is the Bed audible" without anyone having to listen.
+   */
+  async level(ms = 300): Promise<number> {
+    const graph = audioGraph()
+    if (!graph) return 0
+    const { ctx, input } = graph
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 2048
+    input.connect(analyser)
+    await new Promise((resolve) => setTimeout(resolve, ms))
+    const samples = new Float32Array(analyser.fftSize)
+    analyser.getFloatTimeDomainData(samples)
+    input.disconnect(analyser)
+    let sum = 0
+    for (const v of samples) sum += v * v
+    return Math.sqrt(sum / samples.length)
+  },
+
+  /**
+   * Fire n positional test sounds at increasing distances and report how many
+   * the budget let through. Audio has nothing to look at, so this is how the
+   * cap gets verified without counting horns by ear.
+   */
+  testVoices(n = 10): number {
+    const graph = audioGraph()
+    if (!graph || sound.muted) return 0
+    const { ctx } = graph
+    const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < data.length; i++) {
+      data[i] = Math.sin((i / ctx.sampleRate) * 2 * Math.PI * 440) * 0.05
+    }
+    let played = 0
+    for (let i = 0; i < n; i++) {
+      const distance = 200 + i * 400
+      if (playVoice({ buffer, position: [distance, 0, 0], distance })) played++
+    }
+    return played
+  },
 }
 
 declare global {

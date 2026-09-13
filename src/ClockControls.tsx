@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatSimTime, istSecondsSinceMidnight } from './sim/clock'
+import { SoundToggle } from './SoundToggle'
 import { simClock } from './scene/sim-clock'
 
 const SPEEDS = [
@@ -54,6 +55,7 @@ export function ClockControls() {
       >
         IST
       </button>
+      <SoundToggle />
     </div>
   )
 }

@@ -29,6 +29,7 @@ where a Section has fewer Tracks than Lines. "lane" is not a word here.
 
 - `pnpm test` / `pnpm build` (tsc -b + vite) / `pnpm dev`
 - `pnpm bake` — re-bake network JSON from OSM Overpass. Responses cached in `scripts/.cache/` (gitignored); `--refresh` refetches. Bake validates station order, chainage monotonicity, and per-section track counts against known reality and fails loudly on drift.
+- `./scripts/fetch-beds.sh` — re-fetch the ambient Beds from Freesound and re-encode them (needs `curl` + `ffmpeg`; outputs in `public/audio/beds/` are committed, so a clone needs neither). Every clip must be credited in `docs/attribution.md` — that file is the CC-BY obligation, the script is only how the bytes arrived.
 - `pnpm bake:realtimetable` — re-bake `src/data/western-real-timetable.json` from official WR Public Time Tables. Two-stage pipeline: `pip install -r scripts/requirements-timetable.txt && python3 scripts/extract-timetable-pdfs.py` globs every PDF in `data/timetable/` and does position-based grid extraction (direction/AC-ness read from each PDF's own header text, not its filename), writing `scripts/.cache/timetable-raw.json`; then `pnpm bake:realtimetable` (TS) maps station names to network ids, repairs known extraction noise, splits round-trip diagrams, classifies each service, and validates before committing. Re-run both whenever WR publishes a new PTT — just drop the new PDF(s) into `data/timetable/`, any filename.
 
 ## Quirks

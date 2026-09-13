@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber'
 import { MapControls, Sky, Stars } from '@react-three/drei'
 import { faceTracks, network, timetables, type Focus } from '../app-data'
 import { Atmosphere } from './Atmosphere'
+import { AudioRig } from './AudioRig'
 import { Bridges } from './Bridges'
 import { CameraRig, type ControlsLike } from './CameraRig'
 import { IS_COARSE_POINTER } from './config'
@@ -137,6 +138,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
           <Wayside network={network} projection={projection} heightfield={heightfield} />
           <SimClockDriver />
           <CueDriver />
+          <AudioRig timetables={timetables} track={centerTrack} />
           <Fleet
             network={network}
             projection={projection}
