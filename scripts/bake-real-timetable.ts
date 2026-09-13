@@ -156,6 +156,32 @@ function countSkippedStations(run: RawStop[]): number {
   return skipped
 }
 
+/**
+ * A leg no train could have run: long enough to be a real gap, yet implying a
+ * crawl. The 989xx short-workings carry 75-80 minute legs over 4-8 km, which
+ * is the grid extraction picking a time out of an adjacent train's column
+ * where the source cell is blank or dashed.
+ *
+ * Dropped rather than repaired — repairing means inventing a departure time
+ * the PDF does not contain, and the same file already drops runs it cannot
+ * read (see runsDroppedTooShort).
+ */
+const IMPOSSIBLE_LEG_S = 900
+const IMPOSSIBLE_LEG_KMH = 15
+/** Committed count. A new PTT that pushes it up should break the bake rather
+ * than quietly ship trains crawling the corridor for over an hour. */
+const IMPOSSIBLE_SERVICES_EXPECTED = 66
+
+function hasImpossibleLeg(run: RawStop[]): boolean {
+  for (let i = 1; i < run.length; i++) {
+    const secs = run[i].timeSeconds - run[i - 1].timeSeconds
+    if (secs <= IMPOSSIBLE_LEG_S) continue
+    const distM = Math.abs(chainageOf(run[i].stationId) - chainageOf(run[i - 1].stationId))
+    if ((distM / secs) * 3.6 < IMPOSSIBLE_LEG_KMH) return true
+  }
+  return false
+}
+
 /** Skips enough intermediate stations to be running as a fast. */
 function isFastPattern(run: RawStop[]): boolean {
   return countSkippedStations(run) > FAST_SKIP_THRESHOLD
@@ -216,6 +242,7 @@ function main() {
   let stopsRepaired = 0
   let totalRawStops = 0
   let runsDroppedTooShort = 0
+  let runsDroppedImpossible = 0
 
   for (const train of raw) {
     totalRawStops += train.stops.length
@@ -234,6 +261,10 @@ function main() {
       stopsRepaired += before - repaired.length
       if (repaired.length < 2) {
         runsDroppedTooShort++
+        return
+      }
+      if (hasImpossibleLeg(repaired)) {
+        runsDroppedImpossible++
         return
       }
 
@@ -319,6 +350,12 @@ function main() {
   if (runsDroppedTooShort > raw.length * 0.05) {
     problems.push(`dropped ${runsDroppedTooShort} runs as too-short out of ${raw.length} trains — expected <5%`)
   }
+  if (runsDroppedImpossible > IMPOSSIBLE_SERVICES_EXPECTED) {
+    problems.push(
+      `dropped ${runsDroppedImpossible} runs with an impossible leg, over the committed ${IMPOSSIBLE_SERVICES_EXPECTED} — ` +
+        `this PTT reads worse than the last one, check the extraction before raising the threshold`,
+    )
+  }
   if (problems.length > 0) {
     throw new Error(`real timetable failed validation:\n  ${problems.join('\n  ')}`)
   }
@@ -337,6 +374,9 @@ function main() {
   )
   console.log(`${services.length} services (${runsFromReversal} split from round-trip diagrams)`)
   console.log(`repaired ${stopsRepaired}/${totalRawStops} noise stops, dropped ${runsDroppedTooShort} too-short runs`)
+  console.log(
+    `dropped ${runsDroppedImpossible} runs with a leg over ${IMPOSSIBLE_LEG_S}s implying under ${IMPOSSIBLE_LEG_KMH} km/h`,
+  )
   console.log(`AC: ${acCount}, down turnbacks:`, Object.fromEntries(downSlowTermini))
   console.log(`wrote ${OUT_PATH}`)
 }

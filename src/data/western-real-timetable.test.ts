@@ -58,6 +58,28 @@ describe('baked real timetable (WR Public Time Tables)', () => {
     }
   })
 
+  // A leg long enough to be a real gap yet implying a crawl is the grid
+  // extraction reading a time out of an adjacent train's column. 66 such
+  // services were shipping before #21, one of them covering 1.5 km in twelve
+  // hours, and they were the largest single source of same-line overlap.
+  it('has no service crawling the corridor on an impossible leg', () => {
+    const offenders: string[] = []
+    for (const svc of timetable.services) {
+      for (let i = 1; i < svc.stops.length; i++) {
+        const secs = svc.stops[i].t - svc.stops[i - 1].t
+        if (secs <= 900) continue
+        const distM = Math.abs(
+          chainageOf.get(svc.stops[i].stationId)! - chainageOf.get(svc.stops[i - 1].stationId)!,
+        )
+        const kmh = (distM / secs) * 3.6
+        if (kmh < 15) {
+          offenders.push(`${svc.id} ${svc.stops[i - 1].stationId}->${svc.stops[i].stationId} ${secs}s ${kmh.toFixed(1)} km/h`)
+        }
+      }
+    }
+    expect(offenders, offenders.slice(0, 5).join('; ')).toHaveLength(0)
+  })
+
   it('has stop chainage strictly monotonic in the direction of travel', () => {
     for (const svc of timetable.services) {
       const chains = svc.stops.map((s) => chainageOf.get(s.stationId)!)
