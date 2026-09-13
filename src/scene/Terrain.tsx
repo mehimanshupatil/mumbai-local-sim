@@ -19,13 +19,16 @@ const STRIDE = 2
  */
 const SKIRT_M = 400_000
 /**
- * What the skirt fades to at its outer edge. Carrying each border vertex's
- * own colour all the way out smears the ramp into 400 km-long stripes; every
- * outer vertex sharing one dull inland tone turns that into a single gradient
- * away from the data instead.
+ * The skirt is two rings, not one: a short blend band, then flat ground all
+ * the way out. Carrying each border vertex's own colour across the whole
+ * skirt stretches the terrain ramp into 400 km-long stripes fanning off the
+ * plate — the horizon read as a smeared copy of the coast rather than as more
+ * land. Confining the blend to this first band leaves everything past it a
+ * single flat tone with nothing to stretch.
  */
-const HORIZON_COLOR = new Color('#6f7b5e')
-const HORIZON_MIX = 0.93
+const SKIRT_BLEND_M = 9_000
+/** Distant land: the coastal plain's own green, dulled a little for haze. */
+const HORIZON_COLOR = new Color('#6d7d55')
 
 /**
  * Clearance above the sea plane for any vertex the ramp still colours as land.
@@ -196,12 +199,12 @@ export function Terrain({
     for (let gy = 1; gy < h; gy++) border.push(gy * w + w - 1)
     for (let gx = w - 2; gx >= 0; gx--) border.push((h - 1) * w + gx)
     for (let gy = h - 2; gy >= 1; gy--) border.push(gy * w)
-    const skirtPos = new Float32Array((w * h + border.length) * 3)
-    const skirtCol = new Float32Array((w * h + border.length) * 3)
+    const ringCount = border.length
+    const skirtPos = new Float32Array((w * h + ringCount * 2) * 3)
+    const skirtCol = new Float32Array((w * h + ringCount * 2) * 3)
     skirtPos.set(positions)
     skirtCol.set(colors)
     border.forEach((idx, j) => {
-      const o = (w * h + j) * 3
       const x = positions[idx * 3]
       const z = positions[idx * 3 + 2]
       // Straight out of the edge this vertex sits on — corners, which are on
@@ -215,20 +218,34 @@ export function Terrain({
       const sz = gy === 0 ? -1 : gy === h - 1 ? 1 : 0
       const len = Math.hypot(sx, sz) || 1
       // x follows gx (west to east), z follows gy (north to south).
-      skirtPos[o] = x + (sx / len) * SKIRT_M
-      // Tapered most of the way down to the coastal plain: the border can be
-      // 600 m of Sahyadri ridge, and holding that height for 400 km reads as
-      // one impossible plateau filling the eastern sky.
-      skirtPos[o + 1] = positions[idx * 3 + 1] * 0.25
-      skirtPos[o + 2] = z + (sz / len) * SKIRT_M
-      const edge = new Color(colors[idx * 3], colors[idx * 3 + 1], colors[idx * 3 + 2])
-      edge.lerp(HORIZON_COLOR, HORIZON_MIX)
-      skirtCol[o] = edge.r
-      skirtCol[o + 1] = edge.g
-      skirtCol[o + 2] = edge.b
+      const ox = (sx / len)
+      const oz = (sz / len)
+      // Tapered down to flat: the border can be 600 m of Sahyadri ridge, and
+      // holding that height for 400 km reads as one impossible plateau
+      // filling the eastern sky.
+      const edgeY = positions[idx * 3 + 1]
+      // Ring 1 keeps a fraction of the edge's own height so the blend band
+      // still falls away from the Sahyadris rather than shearing off them;
+      // ring 2 is dead flat, because any per-vertex height out there varies
+      // the shading and puts the stretch marks straight back in, colour or
+      // no colour.
+      for (const [ring, outM, y] of [
+        [0, SKIRT_BLEND_M, edgeY * 0.55],
+        [1, SKIRT_M, 0],
+      ] as const) {
+        const o = (w * h + ring * ringCount + j) * 3
+        skirtPos[o] = x + ox * outM
+        skirtPos[o + 1] = y
+        skirtPos[o + 2] = z + oz * outM
+        // Both rings are the flat horizon tone; only the band between the
+        // plate's own edge and the first ring carries any gradient at all.
+        skirtCol[o] = HORIZON_COLOR.r
+        skirtCol[o + 1] = HORIZON_COLOR.g
+        skirtCol[o + 2] = HORIZON_COLOR.b
+      }
     })
 
-    const index = new Uint32Array((w - 1) * (h - 1) * 6 + border.length * 6)
+    const index = new Uint32Array((w - 1) * (h - 1) * 6 + ringCount * 12)
     let k = 0
     for (let gy = 0; gy < h - 1; gy++) {
       for (let gx = 0; gx < w - 1; gx++) {
@@ -244,21 +261,23 @@ export function Terrain({
         index[k++] = d
       }
     }
-    for (let j = 0; j < border.length; j++) {
-      const j2 = (j + 1) % border.length
-      const a = border[j]
-      const b = border[j2]
-      const c = w * h + j
-      const d = w * h + j2
-      // Wound the opposite way round from the grid quads above: the ring walks
-      // the border clockwise in x/z, so the grid's own order would face these
-      // downward and cull them.
-      index[k++] = a
-      index[k++] = b
-      index[k++] = c
-      index[k++] = b
-      index[k++] = d
-      index[k++] = c
+    // Wound the opposite way round from the grid quads above: the ring walks
+    // the border clockwise in x/z, so the grid's own order would face these
+    // downward and cull them.
+    for (let ring = 0; ring < 2; ring++) {
+      for (let j = 0; j < ringCount; j++) {
+        const j2 = (j + 1) % ringCount
+        const inner = ring === 0 ? border[j] : w * h + j
+        const inner2 = ring === 0 ? border[j2] : w * h + j2
+        const outer = w * h + ring * ringCount + j
+        const outer2 = w * h + ring * ringCount + j2
+        index[k++] = inner
+        index[k++] = inner2
+        index[k++] = outer
+        index[k++] = inner2
+        index[k++] = outer2
+        index[k++] = outer
+      }
     }
     const geo = new BufferGeometry()
     geo.setAttribute('position', new BufferAttribute(skirtPos, 3))
