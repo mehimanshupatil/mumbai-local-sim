@@ -5,6 +5,7 @@
 import westernJson from './data/western.json'
 import realTimetableJson from './data/western-real-timetable.json'
 import type { NetworkData } from './data/network-types'
+import { buildCueStream, type Cue } from './sim/cues'
 import { syntheticScheduler } from './sim/scheduler'
 import { faceTracksByStation } from './sim/platforms'
 import { buildRealTimetable, buildTimetable, type Timetable } from './sim/simulate'
@@ -59,3 +60,15 @@ export type Focus =
   | { mode: 'free' }
   | { mode: 'follow'; trainId: string; view?: FollowView }
   | { mode: 'station'; stationId: string }
+
+/**
+ * Every Cue the service day calls for, built on first use rather than at
+ * module load: expanding ~1,350 Services into ~137,000 Cues costs about
+ * 130 ms, and nothing needs it until there is a sound to play. Time to first
+ * frame stays exactly as it was.
+ */
+let cues: Cue[] | null = null
+export function cueStream(): Cue[] {
+  if (!cues) cues = buildCueStream(network, timetables)
+  return cues
+}

@@ -12,6 +12,7 @@ import { useSimDaylight } from './daylight'
 import { Fleet } from './Fleet'
 import { loadHeightfield, type Heightfield } from './heightfield'
 import { createProjection } from './projection'
+import { CueDriver } from './sim-audio'
 import { SimClockDriver } from './sim-clock'
 import { StationDressing } from './StationDressing'
 import { buildTrainTrack } from './track-geometry'
@@ -135,6 +136,7 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
           <Bridges network={network} projection={projection} heightfield={heightfield} />
           <Wayside network={network} projection={projection} heightfield={heightfield} />
           <SimClockDriver />
+          <CueDriver />
           <Fleet
             network={network}
             projection={projection}
