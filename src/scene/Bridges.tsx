@@ -4,7 +4,8 @@ import { trackRibbonGeometry } from './Corridor'
 import { TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
-import { buildTrainTrack, poseAt, sectionAtChainage } from './track-geometry'
+import { sectionAtChainage } from '../sim/lanes'
+import { buildTrainTrack, poseAt } from './track-geometry'
 
 /**
  * Real water crossings on this corridor (ticket #19), as baked chainage

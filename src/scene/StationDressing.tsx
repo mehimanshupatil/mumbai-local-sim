@@ -17,11 +17,12 @@ import { IS_COARSE_POINTER, PLATFORM_LENGTH_SCENE_M, TRACK_SPACING_SCENE_M } fro
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import { buildYardRoadTracks } from './rake-geometry'
+import { sectionAtChainage } from '../sim/lanes'
 import {
   buildTrainTrack,
   corridorSampleStations,
   poseAt,
-  sectionAtChainage,
+  projectOnTrack,
   type TrainTrack,
 } from './track-geometry'
 import { BOARD_WIDTH, WRBoard } from './WRBoard'
@@ -110,6 +111,15 @@ const LIT_BUILDING_SHARE = 0.72
  * read as a car shed inside an office park.
  */
 const YARD_CLEAR_M = 45
+/**
+ * Clear ground either side of the running lines. The scatter lays blocks out
+ * along the station's own straight tangent, up to 800 m either way — but the
+ * corridor curves, so on a bend that straight line walks in over the tracks,
+ * and a block ended up standing on the rails at Mahim Junction. Tested
+ * against the corridor itself rather than the station's local frame, which is
+ * the only way to catch it.
+ */
+const CORRIDOR_CLEAR_M = PLATFORM_W + 30
 
 /** Deterministic PRNG so the city never reshuffles between loads. */
 function mulberry32(seed: number) {
@@ -429,8 +439,16 @@ export function StationDressing({
         const w = 40 + rand() * 50
         const h = 25 + rand() * 65
         const d = 40 + rand() * 50
-        const clear = Math.hypot(w, d) / 2 + YARD_CLEAR_M
-        if (yardRoadPoints.some((p) => Math.hypot(p[0] - x, p[1] - z) < clear)) continue
+        const halfDiag = Math.hypot(w, d) / 2
+        if (yardRoadPoints.some((p) => Math.hypot(p[0] - x, p[1] - z) < halfDiag + YARD_CLEAR_M)) {
+          continue
+        }
+        const onCorridor = projectOnTrack(track, x, z)
+        const railHalf =
+          (sectionAtChainage(network.sections, onCorridor.alongM / track.scale).tracks *
+            TRACK_SPACING_SCENE_M) /
+          2
+        if (Math.abs(onCorridor.lateralM) < railHalf + halfDiag + CORRIDOR_CLEAR_M) continue
         q.setFromAxisAngle(up, s.angleRad + (rand() - 0.5) * 0.4)
         matrices.push(
           new Matrix4().compose(new Vector3(x, ground + h / 2, z), q.clone(), new Vector3(w, h, d)),

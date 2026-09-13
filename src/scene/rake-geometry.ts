@@ -6,7 +6,7 @@
  */
 import type { NetworkData, TrackSection } from '../data/network-types'
 import { YARD_CAPACITY } from '../sim/simulate'
-import { TRACK_EXPRESS_DOWN, TRACK_EXPRESS_UP, TRACK_FAST_DOWN, TRACK_FAST_UP } from '../sim/types'
+import { physicalLane } from '../sim/lanes'
 import {
   COACH_GAP_SCENE_M,
   COACH_LENGTH_SCENE_M,
@@ -72,30 +72,9 @@ export function roadForSlot(roads: TrainTrack[], slot: number | null): TrainTrac
   return roads[Math.min(roads.length - 1, Math.max(0, slot ?? 0))]
 }
 
-/**
- * Drawn lane for a semantic track index within a section. Narrow sections
- * fold expresses onto the fast pair (up direction first, so opposing
- * expresses never share a lane), and the two-track stretch folds everything
- * onto the single up/down pair.
- *
- * Shared with CameraRig, not just Fleet: a cab or lineside camera has to sit
- * on the lane the rake is actually drawn on, or it floats between tracks.
- */
-export function laneFor(track: number, sectionTracks: number): number {
-  const isUp = track % 2 === 1 // all *_UP constants are odd by construction
-  if (sectionTracks >= 6) return track
-  if (track === TRACK_EXPRESS_DOWN || track === TRACK_EXPRESS_UP) {
-    // A lone 5th line hosts down expresses; up expresses join the fast pair.
-    if (sectionTracks === 5 && !isUp) return 4
-    track = isUp ? TRACK_FAST_UP : TRACK_FAST_DOWN
-  }
-  if (sectionTracks <= 2) return isUp ? 1 : 0
-  return Math.min(track, sectionTracks - 1)
-}
-
 /** Lateral offset of a drawn lane from the corridor centreline, within one section. */
 export function laneLateralM(track: number, sectionTracks: number): number {
-  return (laneFor(track, sectionTracks) - (sectionTracks - 1) / 2) * TRACK_SPACING_SCENE_M
+  return (physicalLane(track, sectionTracks) - (sectionTracks - 1) / 2) * TRACK_SPACING_SCENE_M
 }
 
 /**

@@ -11,7 +11,6 @@ import {
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import {
-  assignLanes,
   buildYardRoadTracks,
   COACHES,
   laneLateralAtChainage,
@@ -21,6 +20,7 @@ import {
   RAKE_LEN,
   roadForSlot,
 } from './rake-geometry'
+import { laneAtChainage } from '../sim/lanes'
 import { simClock } from './sim-clock'
 import { buildTrainTrack, poseAt, type TrainTrack } from './track-geometry'
 
@@ -28,11 +28,6 @@ const BODY_W = 18
 const BODY_H = 18
 /** Instance capacity — plenty above the ~70 concurrent rakes at peak. */
 const MAX_RAKES = 128
-/** How fast a rake slides across when it is put onto another line, in
- * e-folds per second — a crossover you can watch, not a teleport. */
-const LANE_CHANGE_RATE = 0.9
-/** The semantic track indices, as declared in sim/types.ts. */
-const SEMANTIC_TRACKS = [0, 1, 2, 3, 4, 5]
 /** Rakes fatten up to BULK_MAX x as the camera passes BULK_DISTANCE_M away. */
 const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
@@ -89,8 +84,6 @@ export function Fleet({
   const noseGeo = useMemo(() => noseGeometry(), [])
   /** Service id per drawn rake slot, refreshed every frame for click picking. */
   const rakeIds = useRef<string[]>([])
-  /** Last drawn lateral per service, so a line change eases instead of popping. */
-  const lateralRef = useRef(new Map<string, number>())
 
   const centerTrack = useMemo(() => buildTrainTrack(network, projection, 0), [network, projection])
   const yardRoads = useMemo(
@@ -112,7 +105,7 @@ export function Fleet({
     [],
   )
 
-  useFrame(({ camera }, delta) => {
+  useFrame(({ camera }) => {
     const bodies = bodyRef.current
     const stripes = stripeRef.current
     const lights = lightRef.current
@@ -123,60 +116,50 @@ export function Fleet({
       warnedCapacity = true
       console.warn(`Fleet: ${states.length} concurrent rakes exceed capacity ${MAX_RAKES}; truncating`)
     }
-    // Where each rake will actually be drawn: nose shifted to the platform
-    // edge on an approach or departure, lateral taken from the line it is
-    // timetabled on — with the lines running the same way offered as fallbacks
-    // if that one is already occupied here (see assignLanes).
+    // Where each rake will actually be drawn: on the line it is timetabled
+    // on, nose shifted toward the platform edge on an approach or departure.
     const rakes = states.map((state) => {
       const dirSign = state.direction === 'down' ? 1 : -1
       const nextStopChainageM = stationChainageById.get(state.nextStopId) ?? state.chainageM
       const parked = state.parkedYardId !== null
-      const refOffset = parked
-        ? 0
-        : dirSign * platformNoseOffsetM(state.chainageM, nextStopChainageM, state.legDistanceM)
-      const home = parked ? 0 : laneLateralAtChainage(sections, state.track, state.chainageM)
-      // Every line running the same way, nearest first — same parity as the
-      // service's own track, since every *_UP constant is odd. Nearest first
-      // means a slow service reaches for the fast line beside it before the
-      // express road beyond it, and a fast one drops to the slow line only
-      // when the express road is taken too.
-      const alternatives = parked
-        ? []
-        : SEMANTIC_TRACKS.filter((t) => t % 2 === state.track % 2 && t !== state.track)
-            .map((t) => laneLateralAtChainage(sections, t, state.chainageM))
-            .filter((lat) => Math.abs(lat - home) > 1)
-            .sort((a, b) => Math.abs(a - home) - Math.abs(b - home))
       return {
         state,
         dirSign,
-        refOffset,
-        along: state.chainageM + refOffset,
-        home,
-        alternatives,
-        lateral: home,
+        // Capped below, so keep the unclamped pull-up distance to hand.
+        wantOffset: parked
+          ? 0
+          : platformNoseOffsetM(state.chainageM, nextStopChainageM, state.legDistanceM),
+        refOffset: 0,
+        lateral: parked ? 0 : laneLateralAtChainage(sections, state.track, state.chainageM),
       }
     })
-    // Parked rakes stand on their own roads and share no space with anything
-    // on the corridor, so they take no part in this. Ordered leading train
-    // first — down services run up the chainage, up services down it — so the
-    // train ahead keeps its own line and the follower is the one put across.
-    const running = rakes.filter((r) => r.state.parkedYardId === null)
-    running.sort((a, b) => b.dirSign * b.along - a.dirSign * a.along)
-    assignLanes(running)
 
-    // Eased toward the assigned line rather than snapped onto it, so being
-    // put onto the fast line reads as a train crossing over.
-    const smoothed = lateralRef.current
-    const damp = 1 - Math.exp(-LANE_CHANGE_RATE * delta)
+    // The sim holds trains a block apart on the line (MIN_SEPARATION_M), but
+    // that is in chainage, and pulling a rake up to the platform edge moves
+    // the drawn one forward by up to ~295 scene-m on top of it — enough to
+    // eat the gap and put it inside the train ahead. A driver does not pull
+    // up into an occupied platform either: the pull-up is given only as much
+    // room as the train ahead leaves.
+    const lines = new Map<string, typeof rakes>()
     for (const r of rakes) {
-      const prev = smoothed.get(r.state.id)
-      const next = prev === undefined ? r.lateral : prev + (r.lateral - prev) * damp
-      smoothed.set(r.state.id, next)
-      r.lateral = next
+      if (r.state.parkedYardId !== null) continue
+      const key = `${laneAtChainage(sections, r.state.track, r.state.chainageM)}:${r.state.direction}`
+      const line = lines.get(key)
+      if (line) line.push(r)
+      else lines.set(key, [r])
     }
-    if (smoothed.size > states.length * 4) {
-      const live = new Set(states.map((s) => s.id))
-      for (const id of smoothed.keys()) if (!live.has(id)) smoothed.delete(id)
+    for (const line of lines.values()) {
+      const sign = line[0].dirSign
+      line.sort((a, b) => sign * (b.state.chainageM - a.state.chainageM)) // leader first
+      let aheadTail = sign * Infinity
+      for (const r of line) {
+        const want = r.state.chainageM + sign * r.wantOffset
+        // Keep a rake length between this nose and the tail ahead of it.
+        const limit = aheadTail - sign * RAKE_LEN
+        const nose = sign > 0 ? Math.min(want, limit) : Math.max(want, limit)
+        r.refOffset = sign * Math.max(0, sign * (nose - r.state.chainageM))
+        aheadTail = r.state.chainageM + r.refOffset - sign * RAKE_LEN
+      }
     }
     let n = 0
     let rake = 0
@@ -228,12 +211,22 @@ export function Fleet({
       )
       const bulk = Math.min(BULK_MAX, Math.max(1, camDist / BULK_DISTANCE_M))
       for (let c = 0; c < COACHES; c++) {
-        const pose = poseAt(track, trackChainageM, refOffset - dirSign * coachOffsets[c])
+        const alongOffset = refOffset - dirSign * coachOffsets[c]
+        const pose = poseAt(track, trackChainageM, alongOffset)
         // Same normal convention as offsetPolyline: left of travel = (-dz, dx).
         const nx = -Math.cos(pose.angleRad)
         const nz = Math.sin(pose.angleRad)
-        const px = pose.x + nx * lateral
-        const pz = pose.z + nz * lateral
+        // Each coach takes the lateral of the line beneath *it*, not the one
+        // beneath the cab. A rake is 555 scene-m long and the lines shift
+        // sideways across a section boundary, so a single lateral for the
+        // whole train leaves it cutting the corner of its own line — and two
+        // trains passing there, each held rigidly off its own rails, can be
+        // drawn straight through one another.
+        const coachLateral = yardTrack
+          ? lateral
+          : laneLateralAtChainage(sections, state.track, trackChainageM + alongOffset / track.scale)
+        const px = pose.x + nx * coachLateral
+        const pz = pose.z + nz * coachLateral
         dummy.position.set(px, heightfield.railY(px, pz) + (BODY_H * bulk) / 2, pz)
         dummy.rotation.set(0, pose.angleRad, 0)
         dummy.scale.set(bulk, bulk, 1)
