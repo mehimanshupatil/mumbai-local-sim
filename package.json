@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "bake": "tsx scripts/bake-network.ts",
     "bake:terrain": "tsx scripts/fetch-terrain.ts",
-    "bake:realtimetable": "tsx scripts/bake-real-timetable.ts"
+    "bake:realtimetable": "tsx scripts/bake-real-timetable.ts",
+    "bake:announcements": "python3 scripts/bake-announcements.py"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

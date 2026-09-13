@@ -45,7 +45,22 @@ two-second fades added at both ends, re-encoded to 128 kbps AAC.
 
 ## Speech
 
-There is none yet. When there is, it will be synthesised rather than recorded,
-and will inherit CC-BY-SA 4.0 from its voice's training data — see
-[ADR 0002](adr/0002-announcements-are-baked-synthetic-speech.md), which also
-explains why real station announcements are not an option.
+`public/audio/speech/` holds the Phrase Bank — every fragment the PA can say,
+synthesised offline with [Piper](https://github.com/OHF-Voice/piper1-gpl)
+(`scripts/bake-announcements.py`). It is synthetic rather than recorded, and
+has no Hindi, for reasons worth reading before changing either:
+[ADR 0002](adr/0002-announcements-are-baked-synthetic-speech.md).
+
+| Sprite | Voice | Trained on | Licence |
+| --- | --- | --- | --- |
+| `mr.m4a` | `mr_IN-google-medium` | [OpenSLR-64](https://openslr.org/64/) | **CC BY-SA 4.0** |
+| `en.m4a` | `en_GB-cori-high` | [LibriVox](https://librivox.org) recordings | Public domain |
+
+**The Marathi sprite is CC BY-SA 4.0**, inherited from its voice's training
+data. That obligation attaches to the generated audio, not to this repo's
+source code: anyone redistributing `mr.m4a` or audio derived from it owes
+attribution to OpenSLR-64 and must share alike. The English sprite carries no
+such condition, its training data being public domain.
+
+Piper itself is GPL-3.0, but it is a build-time tool like any compiler — it is
+not shipped, and it does not reach into the output.

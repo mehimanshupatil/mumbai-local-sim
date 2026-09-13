@@ -1,0 +1,3 @@
+# Phrase Bank bake (scripts/bake-announcements.py). ffmpeg is also needed, and
+# is not a Python package — install it with your package manager.
+piper-tts>=1.3,<2
