@@ -19,12 +19,23 @@ import type { NetworkData } from '../data/network-types'
 import type { Cue } from '../sim/cues'
 import { sectionAtChainage } from '../sim/lines'
 import { trainStates, type Timetable } from '../sim/simulate'
+import type { TrainState } from '../sim/types'
+import { trackForLineAt } from '../sim/lines'
 import { audioGraph, ensureListener, loadedClips, sound } from './audio'
 import { Bed } from './bed'
+import { IS_COARSE_POINTER } from './config'
 import { trackLateralM } from './rake-geometry'
 import { noteSpeech, onCue, simAudio } from './sim-audio'
 import { simClock } from './sim-clock'
 import { isSpoken, loadPhraseBank, phraseBankReady, renderUtterance } from './speech'
+import {
+  brakeBuffer,
+  clackBuffer,
+  hornBuffer,
+  RAIL_PANEL_M,
+  RunningSound,
+  tractionHzFor,
+} from './train-sound'
 import { poseAt, projectOnTrack, type TrainTrack } from './track-geometry'
 import { liveVoices, playVoice, stopAllVoices } from './voices'
 
@@ -51,6 +62,18 @@ const ANNOUNCE_RANGE_M = 2200
 const ANNOUNCE_VOLUME = 1
 const CALLOUT_VOLUME = 0.85
 
+/**
+ * How many Rakes get a continuously synthesised voice at once. Separate from
+ * the discrete voice budget: these never stop, so the cap is on how many
+ * oscillator sets are alive rather than on how many sounds are in flight. The
+ * followed Service always holds one; the other goes to whatever is nearest the
+ * camera, which is what makes a lineside pass-by work.
+ */
+const MAX_RUNNING = IS_COARSE_POINTER ? 1 : 2
+
+/** Past this a Rake is not worth synthesising; the rolloff has it inaudible. */
+const RUNNING_RANGE_M = 3000
+
 export function AudioRig({
   network,
   timetables,
@@ -65,6 +88,7 @@ export function AudioRig({
   const camera = useThree((state) => state.camera)
   const bed = useRef<Bed | null>(null)
   const sinceUpdate = useRef(0)
+  const running = useRef(new Map<string, RunningSound>())
   // Read inside the Cue callback, which outlives any one render.
   const focusRef = useRef(focus)
   focusRef.current = focus
@@ -91,9 +115,12 @@ export function AudioRig({
   }, [camera])
 
   useEffect(() => {
+    const voices = running.current
     return () => {
       bed.current?.dispose()
       bed.current = null
+      for (const voice of voices.values()) voice.dispose()
+      voices.clear()
       stopAllVoices()
     }
   }, [])
@@ -101,15 +128,29 @@ export function AudioRig({
   useEffect(
     () =>
       onCue((cue) => {
-        if (sound.muted || !isSpoken(cue.kind) || !phraseBankReady()) return
+        if (sound.muted) return
         const graph = audioGraph()
         if (!graph) return
-        const spot = cue.faceTrack === null ? null : facePosition(network, track, cue)
         const followed = focusRef.current
-        const riding =
+        const ridingThis =
           followed.mode === 'follow' &&
           followed.trainId === cue.serviceId &&
           (followed.view ?? 'chase') !== 'lineside'
+
+        // The horn and the brakes happen at the Rake, which at both of these
+        // moments is at the Halt the Cue names.
+        if (cue.kind === 'horn' || cue.kind === 'brake') {
+          const at = railPosition(network, track, cue.chainageM, cue.lineId)
+          const distance = Math.hypot(camera.position.x - at[0], camera.position.z - at[2])
+          if (distance > RUNNING_RANGE_M) return
+          const buffer = cue.kind === 'horn' ? hornBuffer(graph.ctx) : brakeBuffer(graph.ctx)
+          playVoice({ buffer, position: at, distance, keep: ridingThis })
+          return
+        }
+
+        if (!isSpoken(cue.kind) || !phraseBankReady()) return
+        const spot = cue.faceTrack === null ? null : facePosition(network, track, cue)
+        const riding = ridingThis
 
         if (spot) {
           const distance = Math.hypot(camera.position.x - spot[0], camera.position.z - spot[2])
@@ -166,7 +207,116 @@ export function AudioRig({
     simAudio.hour = hour
   })
 
+  // Traction and rail joints, for the Rakes worth synthesising. Every frame
+  // rather than twice a second: the whole point is that pitch and rhythm track
+  // the train continuously, and a stepped sweep is audible as steps.
+  useFrame(() => {
+    const voices = running.current
+    const graph = audioGraph()
+    if (sound.muted || !graph) {
+      if (voices.size) {
+        for (const voice of voices.values()) voice.dispose()
+        voices.clear()
+      }
+      return
+    }
+
+    const followed = focusRef.current
+    const states = trainStates(timetables, simClock.t)
+    const wanted = pickRunning(states, followed, camera.position.x, camera.position.z, network, track)
+
+    for (const [id, voice] of voices) {
+      if (!wanted.has(id)) {
+        voice.dispose()
+        voices.delete(id)
+      }
+    }
+    for (const [id, pick] of wanted) {
+      let voice = voices.get(id)
+      if (!voice) {
+        voice = new RunningSound(graph.ctx, graph.input, clackBuffer(graph.ctx))
+        voices.set(id, voice)
+      }
+      voice.update(pick.position, pick.speedMps, pick.curvature, 1)
+    }
+    simAudio.running = voices.size
+    simAudio.runningInfo = [...wanted].map(([id, pick]) => ({
+      id,
+      speedMps: Math.round(pick.speedMps * 10) / 10,
+      tractionHz: Math.round(tractionHzFor(pick.speedMps)),
+      clackHz: Math.round((pick.speedMps / RAIL_PANEL_M) * 100) / 100,
+      curvature: Math.round(pick.curvature * 1e5) / 1e5,
+    }))
+  })
+
   return null
+}
+
+/**
+ * Which Rakes get a continuously synthesised voice: the one being followed,
+ * always, plus whatever is nearest the camera. Distance is measured along the
+ * Corridor first, which is cheap, and only the handful that survive that get
+ * their world position worked out.
+ */
+function pickRunning(
+  states: TrainState[],
+  focus: Focus,
+  camX: number,
+  camZ: number,
+  network: NetworkData,
+  track: TrainTrack,
+): Map<string, { position: [number, number, number]; speedMps: number; curvature: number }> {
+  const here = projectOnTrack(track, camX, camZ).alongM / track.scale
+  const candidates = states
+    .filter((s) => !s.parkedYardId)
+    .map((s) => ({
+      state: s,
+      rank:
+        focus.mode === 'follow' && focus.trainId === s.id
+          ? -1 // the followed Service outranks everything
+          : Math.abs(s.chainageM - here),
+    }))
+    .filter((c) => c.rank < RUNNING_RANGE_M)
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, MAX_RUNNING)
+
+  const out = new Map<string, { position: [number, number, number]; speedMps: number; curvature: number }>()
+  for (const { state } of candidates) {
+    out.set(state.id, {
+      position: railPosition(network, track, state.chainageM, state.lineId),
+      speedMps: state.speedMps,
+      curvature: curvatureAt(track, state.chainageM),
+    })
+  }
+  return out
+}
+
+/** Where a Rake is: on its own Track, not on the corridor centreline. */
+function railPosition(
+  network: NetworkData,
+  track: TrainTrack,
+  chainageM: number,
+  lineId: number,
+): [number, number, number] {
+  const pose = poseAt(track, chainageM)
+  const tracks = sectionAtChainage(network.sections, chainageM).tracks
+  const lateral = trackLateralM(trackForLineAt(network.sections, lineId, chainageM), tracks)
+  return [pose.x - Math.cos(pose.angleRad) * lateral, 0, pose.z + Math.sin(pose.angleRad) * lateral]
+}
+
+/**
+ * How sharply the track turns under a Rake, in radians per metre. Flange squeal
+ * comes out of this rather than a list of Stations with curves, so the Mahim
+ * curves sing because they are drawn bent, not because anyone said so.
+ */
+function curvatureAt(track: TrainTrack, chainageM: number): number {
+  const span = 40
+  const before = poseAt(track, chainageM - span / 2).angleRad
+  const after = poseAt(track, chainageM + span / 2).angleRad
+  let delta = after - before
+  while (delta > Math.PI) delta -= 2 * Math.PI
+  while (delta < -Math.PI) delta += 2 * Math.PI
+  return Math.abs(delta) / span
 }
 
 /**

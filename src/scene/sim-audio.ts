@@ -12,6 +12,7 @@ import { cueStream } from '../app-data'
 import { cuesBetween, type Cue } from '../sim/cues'
 import { audioGraph, sound } from './audio'
 import { simClock } from './sim-clock'
+import { brakeBuffer, clackBuffer, hornBuffer } from './train-sound'
 import { playVoice, VOICE_BUDGET } from './voices'
 
 export type CueListener = (cue: Cue) => void
@@ -61,6 +62,21 @@ export const simAudio = {
   setMuted: (muted: boolean) => sound.setMuted(muted),
   /** Positional sounds alive right now, against the budget. */
   voices: 0,
+  /** Rakes currently being synthesised continuously (traction, joints). */
+  running: 0,
+  /**
+   * What each of those Rakes is doing right now: its own speed, the traction
+   * pitch that speed produces, the rail-joint rate, and the curvature under it.
+   * Everything in #32 is a function of motion, so this is the only way to check
+   * that the function is actually being applied.
+   */
+  runningInfo: [] as {
+    id: string
+    speedMps: number
+    tractionHz: number
+    clackHz: number
+    curvature: number
+  }[],
   budget: VOICE_BUDGET,
   /** Audio assets fetched so far — zero until the first unmute, by design. */
   clips: 0,
@@ -99,6 +115,44 @@ export const simAudio = {
     let sum = 0
     for (const v of samples) sum += v * v
     return Math.sqrt(sum / samples.length)
+  },
+
+  /**
+   * Play one synthesised train sound on its own, at the listener, so its own
+   * spectrum can be read without the Bed and the traction on top of it.
+   */
+  preview(kind: 'horn' | 'brake' | 'clack'): boolean {
+    const graph = audioGraph()
+    if (!graph || sound.muted) return false
+    const build = { horn: hornBuffer, brake: brakeBuffer, clack: clackBuffer }[kind]
+    return playVoice({ buffer: build(graph.ctx), position: null, distance: 0 })
+  },
+
+  /**
+   * The loudest partials coming out, in Hz. Sound has nothing to look at, and
+   * level() only says how much — this says what, which is how a traction pitch
+   * that should track speed gets checked without ears.
+   */
+  async spectrum(ms = 300, count = 6): Promise<{ hz: number; rel: number }[]> {
+    const graph = audioGraph()
+    if (!graph) return []
+    const { ctx, input } = graph
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 8192
+    analyser.smoothingTimeConstant = 0.6
+    input.connect(analyser)
+    await new Promise((resolve) => setTimeout(resolve, ms))
+    const bins = new Float32Array(analyser.frequencyBinCount)
+    analyser.getFloatFrequencyData(bins)
+    input.disconnect(analyser)
+    const hzPerBin = ctx.sampleRate / analyser.fftSize
+    const peaks: { hz: number; rel: number }[] = []
+    for (let i = 2; i < bins.length - 1; i++) {
+      if (bins[i] > bins[i - 1] && bins[i] >= bins[i + 1]) {
+        peaks.push({ hz: Math.round(i * hzPerBin), rel: Math.round(bins[i] * 10) / 10 })
+      }
+    }
+    return peaks.sort((a, b) => b.rel - a.rel).slice(0, count)
   },
 
   /**

@@ -51,11 +51,15 @@ const FRAGMENT_GAP_S = 0.07
 const LANGUAGE_GAP_S = 0.55
 
 /**
- * Silence left at the head of an Announcement for the two-tone PA chime that
- * #33 plays into it. Nothing fills it yet; leaving the room now means the
- * chime arrives without re-timing every Announcement in the day.
+ * A breath before the first word, so an Announcement does not begin the
+ * instant its Cue fires.
+ *
+ * This was room for a two-tone chime, on the assumption that a PA has one.
+ * Checked against four real WR platform recordings and there is no chime on
+ * the local network — the announcer simply starts talking. The gap stays,
+ * much shorter, because the pause is real; the chime is not.
  */
-export const CHIME_LEAD_S = 0.7
+const LEAD_IN_S = 0.25
 
 const sprites = new Map<string, AudioBuffer>()
 
@@ -148,9 +152,9 @@ export function renderUtterance(ctx: AudioContext, cue: Cue): AudioBuffer | null
     const keys = keysFor(cue, lang)
     for (const [i, key] of keys.entries()) {
       const [start, duration] = BANK[lang].fragments[key]
-      // Room for the chime ahead of the first word; a language break ahead of
-      // the first word of the second language.
-      const gapS = parts.length === 0 ? CHIME_LEAD_S : i === 0 ? LANGUAGE_GAP_S : FRAGMENT_GAP_S
+      // A breath before the first word; a language break ahead of the first
+      // word of the second language.
+      const gapS = parts.length === 0 ? LEAD_IN_S : i === 0 ? LANGUAGE_GAP_S : FRAGMENT_GAP_S
       parts.push({ sprite, start, duration, gapS })
       total += gapS + duration
     }
