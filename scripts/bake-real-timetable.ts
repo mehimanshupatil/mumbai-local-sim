@@ -311,24 +311,46 @@ function lineFor(serviceType: ServiceType, direction: Direction, run: RawStop[])
 }
 
 /**
- * A handful of AC services are printed twice: once inline in the main
- * DN/UP PTT for context, again in full in the dedicated DN-AC/UP-AC PTT.
- * Both copies carry identical stop times, so de-duplicate by train number +
- * direction + the exact stop sequence rather than dropping anything a
- * genuinely distinct working might share a train number with.
+ * The same working is printed more than once across the PTTs, in two ways.
+ *
+ * Identical copies: a handful of AC services appear inline in the main DN/UP
+ * PTT for context and again in full in the dedicated AC PTT, with the same
+ * times throughout.
+ *
+ * Truncated copies: the Dahanu sheet carries a run all the way to Dahanu Road
+ * while the main PTT prints the same train only as far as Virar, where that
+ * sheet ends. Same train number, same direction, same times at every Station
+ * both list — one is simply cut short.
+ *
+ * Both are one train, so the longer record wins and the shorter is dropped. A
+ * record that genuinely disagrees about a time is a different working that
+ * happens to share a number (WR really does reuse them), and is kept.
  */
 function dedupeRawTrains(raw: RawTrain[]): RawTrain[] {
-  const seen = new Set<string>()
-  const out: RawTrain[] = []
+  const byWorking = new Map<string, RawTrain[]>()
   for (const train of raw) {
-    const signature = `${train.trainNumber}|${train.direction}|${train.stops
-      .map((s) => `${s.stationId}@${s.timeSeconds}`)
-      .join(',')}`
-    if (seen.has(signature)) continue
-    seen.add(signature)
-    out.push(train)
+    const key = `${train.trainNumber}|${train.direction}`
+    const group = byWorking.get(key)
+    if (group) group.push(train)
+    else byWorking.set(key, [train])
   }
-  return out
+
+  const out: RawTrain[] = []
+  for (const group of byWorking.values()) {
+    // Longest first, so a full run is always the one a truncation is tested
+    // against rather than the other way round.
+    const kept: RawTrain[] = []
+    for (const train of [...group].sort((a, b) => b.stops.length - a.stops.length)) {
+      const isCopy = kept.some((other) => {
+        const times = new Map(other.stops.map((s) => [s.stationId, s.timeSeconds]))
+        return train.stops.every((s) => times.get(s.stationId) === s.timeSeconds)
+      })
+      if (!isCopy) kept.push(train)
+    }
+    out.push(...kept)
+  }
+  // Source order is otherwise meaningful (page order within a PTT), so restore it.
+  return raw.filter((train) => out.includes(train))
 }
 
 function main() {

@@ -196,6 +196,45 @@ describe('baked real timetable (WR Public Time Tables)', () => {
     expect(compliant.length / fastServices.length).toBeGreaterThan(0.9)
   })
 
+  it('serves every Station in both directions', () => {
+    // A railway that only ever carries people away from a Station is not a
+    // railway. Kelve Road and Vangaon each had zero Up Halts (#27), because
+    // the Dahanu sheet stacks its Up grid below its Down grid on one page and
+    // the extractor only ever read the first — so all 21 Up services were
+    // swallowed into the Down grid. Two Stations read as one-way, and nothing
+    // else noticed.
+    const halts = new Map<string, { up: number; down: number }>()
+    for (const svc of timetable.services) {
+      for (const stop of svc.stops) {
+        const entry = halts.get(stop.stationId) ?? { up: 0, down: 0 }
+        if (svc.direction === 'up') entry.up += 1
+        else entry.down += 1
+        halts.set(stop.stationId, entry)
+      }
+    }
+    for (const [stationId, counts] of halts) {
+      const name = network.stations.find((s) => s.id === stationId)?.name ?? stationId
+      expect(counts.up, `${name} has no Up Halts`).toBeGreaterThan(0)
+      expect(counts.down, `${name} has no Down Halts`).toBeGreaterThan(0)
+    }
+  })
+
+  it('works the Dahanu stretch evenly in both directions', () => {
+    // North of Virar there is one sheet and one shuttle service, so the two
+    // directions should match almost exactly; a split here means a grid was
+    // half-read again.
+    for (const id of ['vaitarna', 'saphale', 'kelveroad', 'palghar', 'umroli', 'boisar', 'vangaon']) {
+      const up = timetable.services.filter(
+        (s) => s.direction === 'up' && s.stops.some((x) => x.stationId === id),
+      ).length
+      const down = timetable.services.filter(
+        (s) => s.direction === 'down' && s.stops.some((x) => x.stationId === id),
+      ).length
+      expect(up, id).toBeGreaterThan(10)
+      expect(Math.abs(up - down), `${id}: ${up} up vs ${down} down`).toBeLessThanOrEqual(3)
+    }
+  })
+
   it('runs AC services as both fast and slow workings, as the real ones do', () => {
     const ac = timetable.services.filter((s) => s.serviceType === 'ac')
     const onFast = ac.filter((s) => s.lineId === 2 || s.lineId === 3)

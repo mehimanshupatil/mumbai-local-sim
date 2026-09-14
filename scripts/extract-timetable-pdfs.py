@@ -76,10 +76,43 @@ ALIASES = {
 CANON_BY_KEY = {normalize(n): n for n in CANONICAL_STATIONS}
 
 
+def edit_distance(a: str, b: str) -> int:
+    """Plain Levenshtein; the labels are short, so nothing clever is needed."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+FUZZY_HITS = {}
+
+
 def station_id_for(label: str):
+    """Canonical Station for a PDF label: exact, then alias, then near-miss.
+
+    The PTTs are typed by hand and the typos are real — the Dahanu sheet's Up
+    block alone carries KEVE ROAD, CHERNI ROAD, MERINE LINE and CHUCHGATE. An
+    unmatched label silently drops that Station's entire row for every train on
+    the page, which is how Kelve Road came to have no Up Halts at all (#27), so
+    a near-miss is matched and reported rather than discarded.
+    """
     key = normalize(label)
     key = ALIASES.get(key, key)
-    return CANON_BY_KEY.get(key)
+    if key in CANON_BY_KEY:
+        return CANON_BY_KEY[key]
+    if len(key) < 5:
+        return None
+    scored = sorted((edit_distance(key, k), k) for k in CANON_BY_KEY)
+    best, runner = scored[0], scored[1]
+    # Only an unambiguous near-miss: one edit per five characters, and clearly
+    # closer to this Station than to any other.
+    if best[0] <= max(1, len(key) // 5) and best[0] < runner[0]:
+        FUZZY_HITS.setdefault(label.strip(), CANON_BY_KEY[best[1]])
+        return CANON_BY_KEY[best[1]]
+    return None
 
 
 TRAIN_NUMBER_RE = re.compile(r"^\d{4,6}[A-Z]?$")
@@ -122,25 +155,40 @@ def snap_distance(col_x0s):
     return max(8.0, min(24.0, min(gaps) / 2 - 2))
 
 
+def header_rows(rows):
+    """Every row that anchors a grid: one whose tokens are mostly train numbers.
+
+    A page can carry more than one. The Dahanu sheet stacks its Down grid above
+    its Up grid on a single page, and reading only the first meant all 21 Up
+    services were swallowed into the Down grid at the wrong column positions —
+    the cause of #27. Matched by content rather than by an x0 cutoff, since
+    data columns start at different x across PTT layouts.
+    """
+    out = []
+    for i, row in enumerate(rows):
+        numberish = [w for w in row if TRAIN_NUMBER_RE.match(w["text"])]
+        if len(numberish) >= max(2, len(row) * 0.5):
+            out.append(i)
+    return out
+
+
 def parse_page(page, direction: str, service_hint: str | None, source: str, page_no: int):
     words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
     if not words:
         return []
     rows = cluster_rows(words)
 
-    # Header block: the row whose tokens are mostly train numbers anchors
-    # column x-positions. Matched by content (regex), not by an x0 cutoff —
-    # data-column start position varies a lot between PTT layouts (the main
-    # DN/UP grids start past x0=150; the tighter Dahanu PTT starts at x0=92,
-    # which a fixed threshold silently drops, shifting every column after it).
-    header_row_idx = None
-    for i, row in enumerate(rows[:6]):
-        numberish = [w for w in row if TRAIN_NUMBER_RE.match(w["text"])]
-        if len(numberish) >= max(2, len(row) * 0.5):
-            header_row_idx = i
-            break
-    if header_row_idx is None:
+    heads = header_rows(rows)
+    if not heads:
         return []  # notes/blank page
+    out = []
+    for n, head in enumerate(heads):
+        end = heads[n + 1] if n + 1 < len(heads) else len(rows)
+        out.extend(parse_grid(rows, head, end, direction, service_hint, source, page_no))
+    return out
+
+
+def parse_grid(rows, header_row_idx, end_row_idx, direction, service_hint, source, page_no):
 
     number_row = rows[header_row_idx]
     number_words = sorted(
@@ -173,6 +221,7 @@ def parse_page(page, direction: str, service_hint: str | None, source: str, page
     # matches a canonical station name (in order; skip non-matching rows —
     # they're page titles or footnote lines, not data).
     stations_seen = 0
+    row_stations = []
     trains = [
         {
             "source": source,
@@ -188,7 +237,7 @@ def parse_page(page, direction: str, service_hint: str | None, source: str, page
         for i, tn in enumerate(train_numbers)
     ]
 
-    for row in rows[header_row_idx + 2 :]:
+    for row in rows[header_row_idx + 2 : end_row_idx]:
         label_words = sorted((w for w in row if w["x0"] < label_max_x0), key=lambda w: w["x0"])
         if not label_words:
             continue
@@ -197,6 +246,7 @@ def parse_page(page, direction: str, service_hint: str | None, source: str, page
         if not sid:
             continue  # footnote / stray text row
         stations_seen += 1
+        row_stations.append(sid)
         by_col = row_text_by_column([w for w in row if w["x0"] >= label_max_x0], col_x0s, snap)
         for i in range(len(col_x0s)):
             for w in by_col.get(i, []):
@@ -210,8 +260,25 @@ def parse_page(page, direction: str, service_hint: str | None, source: str, page
                     trains[i]["notes"].append(w["text"])
 
     if stations_seen < 5:
-        return []  # didn't find a real station grid on this page
-    return [t for t in trains if t["stops"]]
+        return []  # didn't find a real station grid here
+    trains = [t for t in trains if t["stops"]]
+
+    # Direction comes from the grid's own rows rather than from the file: the
+    # Stations are printed in running order, so a grid whose last Halt is
+    # nearer Churchgate than its first is an Up grid, whatever the PDF's title
+    # block says. This is the fact that #27 turned on — the Dahanu sheet is
+    # headed "DN DRD SERVICES" and contains both directions.
+    order = [CANONICAL_STATIONS.index(s) for s in row_stations if s in CANONICAL_STATIONS]
+    if len(order) >= 2:
+        grid_direction = "up" if order[-1] < order[0] else "down"
+        if grid_direction != direction:
+            print(
+                f"  {source} p{page_no} grid at row {header_row_idx}: "
+                f"{len(trains)} trains run {grid_direction}, not {direction} as the file suggests"
+            )
+        for t in trains:
+            t["direction"] = grid_direction
+    return trains
 
 
 def main():
@@ -228,6 +295,16 @@ def main():
             for pno, page in enumerate(pdf.pages):
                 trains = parse_page(page, direction, hint, path.name, pno)
                 all_trains.extend(trains)
+
+    if FUZZY_HITS:
+        print("\nlabels matched past a typo (check these are right):")
+        for label, canon in sorted(FUZZY_HITS.items()):
+            print(f"  {label!r} -> {canon}")
+
+    by_direction = {}
+    for t in all_trains:
+        by_direction[t["direction"]] = by_direction.get(t["direction"], 0) + 1
+    print("\ntrains by direction:", by_direction)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(all_trains, indent=1))
