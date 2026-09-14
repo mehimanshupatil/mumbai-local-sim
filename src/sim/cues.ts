@@ -31,7 +31,6 @@ export type CueKind =
   | 'callout-terminus'
   | 'horn'
   | 'brake'
-  | 'door-close'
 
 /**
  * The Cues that play at a Platform Face rather than at the Rake. The rest are
@@ -69,7 +68,11 @@ export interface Cue {
 /**
  * Lead times, in seconds before the moment they anticipate. Chosen so a Halt
  * plays in the order a platform actually sounds: approach PA, brakes, arrival,
- * departure PA, doors, horn, then the in-Rake callout as it pulls away.
+ * departure PA, horn, then the in-Rake callout as it pulls away.
+ *
+ * There is no door Cue. Mumbai local Rakes run with their doorways open —
+ * always, by design, not by neglect — so the sound that ends a Dwell everywhere
+ * else does not exist on this Route.
  *
  * Every one of them is clamped inside the Service's own timings (see
  * cuesForStop), so a 0-second Dwell or a very short leg compresses the
@@ -80,7 +83,6 @@ const APPROACH_CALLOUT_LEAD_S = 40
 const TERMINUS_CALLOUT_LEAD_S = 40
 const BRAKE_LEAD_S = 15
 const DEPARTURE_ANNOUNCE_LEAD_S = 12
-const DOOR_CLOSE_LEAD_S = 3
 const DEPARTURE_CALLOUT_DELAY_S = 5
 
 /** Ties broken the same way every time, so two Cues at one second keep a stable order. */
@@ -90,7 +92,6 @@ const KIND_ORDER: CueKind[] = [
   'callout-approach',
   'callout-terminus',
   'announce-departure',
-  'door-close',
   'horn',
   'callout-departure',
 ]
@@ -181,12 +182,6 @@ function cuesForStop(
     kind: 'announce-departure',
     t: departing(DEPARTURE_ANNOUNCE_LEAD_S),
     faceTrack: face,
-  })
-  out.push({
-    ...base,
-    kind: 'door-close',
-    t: departing(DOOR_CLOSE_LEAD_S),
-    faceTrack: null,
   })
   out.push({ ...base, kind: 'horn', t: stop.departT, faceTrack: null })
   // The in-Rake callout names where it is going, so it carries the *next*

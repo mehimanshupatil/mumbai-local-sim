@@ -75,7 +75,9 @@ without stopping are skipped, not halted.
 _Avoid_: stop, call
 
 **Dwell**:
-How long a Rake stands at a Halt.
+How long a Rake stands at a Halt. It is not bounded by doors: a Mumbai local
+runs with its doorways open throughout, so a Dwell begins and ends with the
+brakes, and there is no door Cue anywhere in the sim.
 _Avoid_: wait, hold (means something different here)
 
 **Turnback**:

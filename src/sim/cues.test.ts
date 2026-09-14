@@ -51,7 +51,6 @@ describe('a Service through one Halt', () => {
       'callout-approach',
       'brake',
       'announce-departure',
-      'door-close',
       'horn',
     ])
   })
@@ -82,7 +81,7 @@ describe('origin and terminus', () => {
   const terminus = tt.stops[tt.stops.length - 1]
 
   it('does not announce a Service into the Halt it starts from', () => {
-    expect(kindsAt(cues, origin.id)).toEqual(['announce-departure', 'door-close', 'horn'])
+    expect(kindsAt(cues, origin.id)).toEqual(['announce-departure', 'horn'])
   })
 
   it('gives a Service arriving at its last Halt a terminus Callout and no departure', () => {
@@ -111,6 +110,14 @@ describe('origin and terminus', () => {
 
   it('carries the terminus on every Cue, so an Announcement can say "towards X"', () => {
     for (const c of cues) expect(c.terminusId).toBe(terminus.id)
+  })
+})
+
+describe('doors', () => {
+  it('never closes a door, because a Mumbai local never does', () => {
+    // The doorways stay open the whole run, by design rather than neglect, so
+    // the sound that ends a Dwell on other railways has no Cue here.
+    for (const cue of stream) expect(cue.kind).not.toContain('door')
   })
 })
 
