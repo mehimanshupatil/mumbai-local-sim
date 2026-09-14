@@ -3,3 +3,6 @@ dist
 scripts/.cache
 *.tsbuildinfo
 .DS_Store
+# Reference recordings for tuning the sound layer — large, and third-party.
+# Measured, never shipped; see docs/attribution.md.
+data/audio-reference
