@@ -16,7 +16,7 @@ where a Section has fewer Tracks than Lines. "lane" is not a word here.
 
 - `src/sim/` — pure simulation core: `(network, services, simTime) → TrainState[]`. **No React or three.js imports here, ever.** Deterministic: same inputs, same output.
 - `src/data/` — baked network JSON (`western.json`) + line-agnostic types. True-scale WGS84/chainage data; visual exaggeration happens only at render time (`src/scene/config.ts`).
-- `src/scene/` — rendering layer; consumes sim output. The train visual is a swappable component.
+- `src/scene/` — rendering layer; consumes sim output. The train visual is swappable: `rake-visual.ts` builds a Rake's geometry and its mask material (pure, no per-frame work), `Fleet.tsx` only instances and poses them.
 - Future Routes (Central, Harbour, Metro) must arrive as new baked datasets, not new code paths.
 
 ## Testing (two seams only)
