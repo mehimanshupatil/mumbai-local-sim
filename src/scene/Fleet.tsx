@@ -1,10 +1,11 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { InstancedBufferAttribute, InstancedMesh, Object3D } from 'three'
+import { InstancedBufferAttribute, InstancedMesh, Object3D, Vector3 } from 'three'
 import type { NetworkData } from '../data/network-types'
 import { trainStates, type Timetable } from '../sim/simulate'
 import { COACH_GAP_SCENE_M, COACH_LENGTH_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
+import { COACH } from './livery-atlas'
 import type { Projection } from './projection'
 import {
   buildYardRoadTracks,
@@ -29,6 +30,14 @@ import {
   SEED_ATTRIBUTE,
   STRIPE_ATTRIBUTE,
 } from './rake-visual'
+import {
+  buildRiderGeometry,
+  doorwayLoad,
+  MAX_PER_DOORWAY,
+  rakeSeed,
+  riderColor,
+  riderSlots,
+} from './riders'
 import { trackForLineAt } from '../sim/lines'
 import { simClock } from './sim-clock'
 import { buildTrainTrack, poseAt, type TrainTrack } from './track-geometry'
@@ -47,6 +56,14 @@ const MAX_NEAR_RAKES = 24
  * what the distance-fattening lie below reads well on.
  */
 const DETAIL_DISTANCE_M = 2500
+/**
+ * Riders are drawn much closer in than the coach they stand in: a figure is
+ * subpixel well before a doorway is, and a crush-loaded rake is ~290 of them.
+ */
+const RIDER_DISTANCE_M = 900
+const MAX_RIDER_RAKES = 6
+/** Both sides of the body, every doorway, filled to crush. */
+const RIDERS_PER_COACH = COACH.doorsPerSide * 2 * MAX_PER_DOORWAY
 /** Rakes fatten up to BULK_MAX x as the camera passes BULK_DISTANCE_M away. */
 const BULK_DISTANCE_M = 25000
 const BULK_MAX = 3.5
@@ -77,10 +94,14 @@ export function Fleet({
   onSelectTrain: (trainId: string) => void
 }) {
   const nearRef = useRef<InstancedMesh>(null)
+  const riderRef = useRef<InstancedMesh>(null)
   const farRef = useRef<InstancedMesh>(null)
   const cabRef = useRef<InstancedMesh>(null)
   const lightRef = useRef<InstancedMesh>(null)
   const dummy = useMemo(() => new Object3D(), [])
+  const rider = useMemo(() => new Object3D(), [])
+  const riderAt = useMemo(() => new Vector3(), [])
+  const riderGeometry = useMemo(() => buildRiderGeometry(), [])
 
   const visual = useMemo(() => {
     const atlas = loadAtlas(import.meta.env.BASE_URL)
@@ -121,7 +142,8 @@ export function Fleet({
     const far = farRef.current
     const cabs = cabRef.current
     const lights = lightRef.current
-    if (!near || !far || !cabs || !lights) return
+    const riders = riderRef.current
+    if (!near || !far || !cabs || !lights || !riders) return
     visual.uniforms.uNight.value = night
     const stripeOf = (mesh: InstancedMesh) =>
       mesh.geometry.getAttribute(STRIPE_ATTRIBUTE) as InstancedBufferAttribute
@@ -180,6 +202,8 @@ export function Fleet({
     let nearN = 0
     let farN = 0
     let cabN = 0
+    let riderN = 0
+    let riderRakes = 0
     let rake = 0
     for (const { state, dirSign: baseDirSign, refOffset: baseRefOffset, lateral: drawnLateral } of rakes) {
       if (rake >= MAX_RAKES) break
@@ -231,6 +255,13 @@ export function Fleet({
       const detailed = camDist < DETAIL_DISTANCE_M && nearN + COACHES <= MAX_NEAR_RAKES * COACHES
       const bulk = detailed ? 1 : Math.min(BULK_MAX, Math.max(1, camDist / BULK_DISTANCE_M))
       const mesh = detailed ? near : far
+      // Riders in the doorways, on the rakes close enough for a figure to be
+      // more than a pixel. How full they are is the sim's Crowding curve, so
+      // the same Rake is packed Up at 08:00 and empty Down at 09:00.
+      const withRiders = detailed && camDist < RIDER_DISTANCE_M && riderRakes < MAX_RIDER_RAKES
+      const load = withRiders ? doorwayLoad(simClock.t, state.direction) : 0
+      const crowdSeed = withRiders ? rakeSeed(state.id) : 0
+      if (withRiders) riderRakes++
       if (!detailed && farN + COACHES > MAX_RAKES * COACHES) break
       // One seed per rake: the shader varies lit windows off it, so a night
       // rake is not twelve identical glowing bars.
@@ -264,6 +295,19 @@ export function Fleet({
         if (detailed) {
           stripeOf(near).setXYZ(n, livery.stripe.r, livery.stripe.g, livery.stripe.b)
           seedOf(near).setX(n, seed + c)
+        }
+        if (withRiders) {
+          for (const slot of riderSlots(crowdSeed, c, load)) {
+            // Slots are coach-local, so the coach's own matrix puts them in
+            // the doorway wherever that coach has ended up on the Track.
+            riderAt.set(slot.x, slot.y, slot.z).applyMatrix4(dummy.matrix)
+            rider.position.copy(riderAt)
+            rider.rotation.set(0, pose.angleRad, 0)
+            rider.updateMatrix()
+            riders.setMatrixAt(riderN, rider.matrix)
+            riders.setColorAt(riderN, riderColor(slot.variation))
+            riderN++
+          }
         }
       }
       if (detailed) nearIds.current[nearN / COACHES - 1] = state.id
@@ -311,8 +355,9 @@ export function Fleet({
     near.count = nearN
     far.count = farN
     cabs.count = cabN
+    riders.count = riderN
     lights.count = rake
-    for (const mesh of [near, far, cabs, lights]) {
+    for (const mesh of [near, far, cabs, lights, riders]) {
       mesh.instanceMatrix.needsUpdate = true
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
     }
@@ -347,6 +392,15 @@ export function Fleet({
         {/* Far rakes keep a hint of the lit-window glow, or the corridor view
             loses its trains after dark. */}
         <meshStandardMaterial emissive="#ffca7a" emissiveIntensity={night * 0.5} />
+      </instancedMesh>
+      {/* Riders standing in the open doorways — the doorway is open by
+          definition here, so this is what fills it. */}
+      <instancedMesh
+        ref={riderRef}
+        args={[riderGeometry, undefined, MAX_RIDER_RAKES * COACHES * RIDERS_PER_COACH]}
+        frustumCulled={false}
+      >
+        <meshStandardMaterial roughness={0.9} metalness={0} />
       </instancedMesh>
       <instancedMesh
         ref={cabRef}

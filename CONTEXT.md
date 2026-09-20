@@ -126,6 +126,17 @@ Time added to a Service against its published schedule so that a minimum
 Headway is preserved.
 _Avoid_: delay (reserved for unscheduled lateness), wait
 
+**Crowding**:
+How full a Service is, as a function of the hour and its direction. A property
+of the Service, not of the Rake working it — the same Rake is crushed Up at
+08:00 and empty Down an hour later.
+_Avoid_: load, occupancy, capacity, rush
+
+**Rider**:
+A person standing in a Rake's open doorway. The doorway is open by definition
+(see Dwell), so Riders are what fills it.
+_Avoid_: passenger (means anyone aboard), hanger, commuter
+
 ### Sound
 
 **Cue**:
