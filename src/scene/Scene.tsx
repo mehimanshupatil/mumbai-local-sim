@@ -10,12 +10,14 @@ import { IS_COARSE_POINTER } from './config'
 import { Corridor } from './Corridor'
 import { Effects } from './Effects'
 import { useSimDaylight } from './daylight'
+import { DevCamera } from './dev-camera'
 import { Fleet } from './Fleet'
 import { loadHeightfield, type Heightfield } from './heightfield'
 import { createProjection } from './projection'
 import { CueDriver } from './sim-audio'
 import { SimClockDriver } from './sim-clock'
 import { StationDressing } from './StationDressing'
+import { StationLabels } from './station-labels'
 import { buildTrainTrack } from './track-geometry'
 import { Terrain } from './Terrain'
 import { Wayside } from './Wayside'
@@ -152,6 +154,10 @@ export function Scene({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) =>
             night={daylight.night}
             onSelectTrain={(trainId) => onFocus({ mode: 'follow', trainId })}
           />
+          {/* After the components that register labels: one pass decides
+              which Station names are visible this frame. */}
+          <StationLabels />
+          <DevCamera controls={controlsRef as React.RefObject<ControlsLike | null>} />
           <Effects daylight={daylight} />
           <CameraRig
             focus={focus}

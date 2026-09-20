@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Billboard } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import {
@@ -26,6 +26,7 @@ import {
   type TrainTrack,
 } from './track-geometry'
 import { TRACK_WIDTH_SCENE_M } from './Corridor'
+import { registerLabel, unregisterLabel } from './station-labels'
 import { platformSlabs } from '../sim/platforms'
 import { BOARD_WIDTH, WRBoard } from './WRBoard'
 
@@ -42,22 +43,12 @@ const PLATFORM_H = 10
 const PLATFORM_COLOR = '#8f8a84'
 const BOARD_Y = 150
 /**
- * These boards are the close-up representation: Corridor's floating labels
- * fade *in* over the same band (dist 4000 -> 12000) and take over from here.
- * Without the matching fade *out*, all 37 stayed drawn at every distance and
- * collapsed into overlapping specks near the horizon — the handover was only
- * ever half-implemented, and Corridor's declutter can't see these.
+ * These boards are the close-up representation of a Station's name; Corridor's
+ * floating label is the far one. Which of the two draws, and whether either
+ * survives a crowded view, is decided in station-labels.ts — this component
+ * only says where its board hangs. Two independent declutter passes could not
+ * see each other's boards, which is what #26 was.
  */
-const BOARD_FADE_NEAR = 4000
-const BOARD_FADE_FAR = 12000
-/**
- * Close in, the floating board hands over to the boards standing on the
- * platform (see platformBoards) — the ones a real station actually has. Left
- * on, a signboard several storeys tall hangs over the roof of the station in
- * every close view.
- */
-const BOARD_HANDOVER_NEAR = 700
-const BOARD_HANDOVER_FAR = 1700
 /**
  * Name boards along each platform, standing square across it — the board face
  * perpendicular to the rails, so it reads to a train coming up the platform
@@ -385,23 +376,30 @@ export function StationDressing({
     [stations, track, heightfield],
   )
 
-  // Hand the boards over to Corridor's floating labels as the camera pulls
-  // back (see BOARD_FADE_NEAR/FAR).
-  const boardRefs = useRef<(Group | null)[]>([])
   const platformBoardsRef = useRef<Group>(null)
   const boardPoints = useMemo(
     () => stations.map((s) => new Vector3(s.x, s.y + BOARD_Y, s.z)),
     [stations],
   )
-  useFrame(({ camera }) => {
-    for (let i = 0; i < boardPoints.length; i++) {
-      const board = boardRefs.current[i]
-      if (!board) continue
-      const dist = camera.position.distanceTo(boardPoints[i])
-      const far = (BOARD_FADE_FAR - dist) / (BOARD_FADE_FAR - BOARD_FADE_NEAR)
-      const near = (dist - BOARD_HANDOVER_NEAR) / (BOARD_HANDOVER_FAR - BOARD_HANDOVER_NEAR)
-      board.scale.setScalar(Math.min(1, Math.max(0, far)) * Math.min(1, Math.max(0, near)))
+  const registerBoard = useCallback(
+    (i: number, g: Group | null) => {
+      registerLabel(stations[i].id, 'board', {
+        group: g,
+        point: boardPoints[i],
+        scale: 1,
+        fastHalt: true, // a board this close is never the one that yields to range
+      })
+    },
+    [stations, boardPoints],
+  )
+  useEffect(() => {
+    const ids = stations.map((s) => s.id)
+    return () => {
+      for (const id of ids) unregisterLabel(id, 'board')
     }
+  }, [stations])
+
+  useFrame(({ camera }) => {
     // The platform boards are life-sized, so they are worth drawing only from
     // close in; past that they are sub-pixel and cost a text mesh apiece.
     const group = platformBoardsRef.current
@@ -600,9 +598,7 @@ export function StationDressing({
       {stations.map((s, i) => (
         <Billboard
           key={s.id}
-          ref={(g: Group | null) => {
-            boardRefs.current[i] = g
-          }}
+          ref={(g: Group | null) => registerBoard(i, g)}
           position={[s.x, s.y + BOARD_Y, s.z]}
           onClick={(e) => {
             e.stopPropagation()

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Billboard } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { BufferAttribute, BufferGeometry, Vector3, type Group } from 'three'
@@ -8,6 +8,7 @@ import { TRACK_SPACING_SCENE_M } from './config'
 import type { Heightfield } from './heightfield'
 import type { Projection } from './projection'
 import { buildTrackPolylines, terminusStub } from './track-geometry'
+import { registerLabel, unregisterLabel } from './station-labels'
 import { createTrackTexture } from './track-texture'
 import { WRBoard } from './WRBoard'
 
@@ -31,15 +32,6 @@ const FAST_HALT_COLOR = '#e0a020'
 /** WRBoard's own text is sized for close-up reading (see StationDressing);
  * scaled up so the floating corridor-level label stays legible from afar. */
 const LABEL_SCALE = 9
-/**
- * Minimum on-screen separation between two visible station labels, as a
- * fraction of viewport height. Looking along a 124 km corridor puts a dozen
- * stations within a few degrees of the horizon, so distance-based sizing
- * alone can't stop them stacking into one unreadable yellow block — the
- * nearest label in a cluster wins and the rest yield.
- */
-const LABEL_MIN_SEPARATION_X = 0.17
-const LABEL_MIN_SEPARATION_Y = 0.05
 /** Height of the floating label above its station marker. */
 const LABEL_Y = 520
 
@@ -121,7 +113,6 @@ export function Corridor({
   }, [network, projection, heightfield])
   const trackGeometries = useMemo(() => tracks.map((t) => trackRibbonGeometry(t)), [tracks])
   const gl = useThree((s) => s.gl)
-  const size = useThree((s) => s.size)
   const trackTexture = useMemo(
     () => createTrackTexture(gl.capabilities.getMaxAnisotropy()),
     [gl],
@@ -140,70 +131,29 @@ export function Corridor({
     () => stationPoints.map((p) => new Vector3(p.x, p.y + LABEL_Y, p.z)),
     [stationPoints],
   )
-  const labelRefs = useRef<(Group | null)[]>([])
-  const registerLabel = useCallback((i: number, g: Group | null) => {
-    labelRefs.current[i] = g
-  }, [])
+  const registerFloat = useCallback(
+    (i: number, g: Group | null) => {
+      registerLabel(network.stations[i].id, 'float', {
+        group: g,
+        point: labelPoints[i],
+        scale: LABEL_SCALE,
+        fastHalt: stationPoints[i].fastHalt,
+      })
+    },
+    [network, labelPoints, stationPoints],
+  )
 
-  const ndc = useMemo(() => new Vector3(), [])
-  const visible = useRef<{ x: number; y: number }[]>([])
-  useFrame(({ camera }) => {
-    const aspect = size.width / Math.max(1, size.height)
-    // Size each label by distance first, then let the nearest of any
-    // overlapping cluster win — sizing alone can't declutter a corridor seen
-    // end-on, where a dozen stations project into the same few degrees.
-    const candidates: { i: number; dist: number; x: number; y: number; scale: number }[] = []
-    for (let i = 0; i < labelPoints.length; i++) {
-      const label = labelRefs.current[i]
-      if (!label) continue
-      const p = labelPoints[i]
-      const dist = camera.position.distanceTo(p)
-      // Close up the yellow board takes over from the floating label; far out,
-      // minor-station labels yield so the dense south corridor doesn't smear.
-      const near = Math.min(1, Math.max(0, (dist - 4000) / 8000))
-      const far = stationPoints[i].fastHalt
-        ? 1
-        : Math.min(1, Math.max(0, (45000 - dist) / 10000))
-      const scale = near * far * LABEL_SCALE
-      if (scale <= 0) {
-        label.scale.setScalar(0)
-        continue
-      }
-      ndc.copy(p).project(camera)
-      if (ndc.z > 1) {
-        label.scale.setScalar(0)
-        continue
-      }
-      candidates.push({ i, dist, x: ndc.x, y: ndc.y, scale })
+  // Visibility is not decided here. Both this floating label and
+  // StationDressing's close-up board are registered with station-labels.ts,
+  // which picks one representation per Station and resolves overlaps across
+  // every board on screen — neither component can see the other's, which is
+  // how a floating label came to sit across a different Station's board (#26).
+  useEffect(() => {
+    const ids = network.stations.map((s) => s.id)
+    return () => {
+      for (const id of ids) unregisterLabel(id, 'float')
     }
-    candidates.sort((a, b) => a.dist - b.dist)
-    const kept = visible.current
-    kept.length = 0
-    for (const c of candidates) {
-      const label = labelRefs.current[c.i]
-      if (!label) continue
-      let crowded = false
-      for (const k of kept) {
-        // NDC spans -1..1 on both axes; convert to fractions of viewport
-        // height so the threshold means the same thing at any aspect ratio.
-        // The test is elliptical, not circular: a board is ~3.75x wider than
-        // it is tall, so a circle sized to clear them vertically still lets
-        // two side-by-side boards overlap.
-        const dx = ((c.x - k.x) * aspect) / 2 / LABEL_MIN_SEPARATION_X
-        const dy = (c.y - k.y) / 2 / LABEL_MIN_SEPARATION_Y
-        if (Math.hypot(dx, dy) < 1) {
-          crowded = true
-          break
-        }
-      }
-      if (crowded) {
-        label.scale.setScalar(0)
-      } else {
-        label.scale.setScalar(c.scale)
-        kept.push({ x: c.x, y: c.y })
-      }
-    }
-  })
+  }, [network])
 
   return (
     <group>
@@ -226,7 +176,7 @@ export function Corridor({
           position={[stationPoints[i].x, stationPoints[i].y, stationPoints[i].z]}
           night={night}
           onSelect={() => onSelectStation(s.id)}
-          labelRef={(g) => registerLabel(i, g)}
+          labelRef={(g) => registerFloat(i, g)}
         />
       ))}
     </group>
@@ -248,7 +198,7 @@ function StationMarker({
   position: [number, number, number]
   night: number
   onSelect: () => void
-  /** Corridor sizes and declutters labels across all stations at once. */
+  /** station-labels.ts owns whether and how large this label draws. */
   labelRef: (g: Group | null) => void
 }) {
   const color = fastHalt ? FAST_HALT_COLOR : STATION_COLOR
@@ -258,27 +208,31 @@ function StationMarker({
     // closes in (they stay as the station's click target, so never to zero).
     const g = ref.current
     if (!g) return
-    const dist = camera.position.distanceTo(g.position)
+    const dist = camera.position.distanceTo(g.parent?.position ?? g.position)
     g.scale.setScalar(Math.min(1, Math.max(0.06, dist / 12000)))
   })
   return (
     <group
-      ref={ref}
       position={[x, y, z]}
       onClick={(e) => {
         e.stopPropagation()
         onSelect()
       }}
     >
-      <mesh position={[0, 150, 0]}>
-        <cylinderGeometry args={[18, 18, 300]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      {/* the marker head doubles as the platform lamp after dark */}
-      <mesh position={[0, 330, 0]}>
-        <sphereGeometry args={[55]} />
-        <meshStandardMaterial color={color} emissive="#ffe9b0" emissiveIntensity={night * 1.6} />
-      </mesh>
+      {/* Only the marker scales with distance. The label hangs outside it, so
+          its size is the arbiter's alone rather than the product of two
+          independent rules. */}
+      <group ref={ref}>
+        <mesh position={[0, 150, 0]}>
+          <cylinderGeometry args={[18, 18, 300]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        {/* the marker head doubles as the platform lamp after dark */}
+        <mesh position={[0, 330, 0]}>
+          <sphereGeometry args={[55]} />
+          <meshStandardMaterial color={color} emissive="#ffe9b0" emissiveIntensity={night * 1.6} />
+        </mesh>
+      </group>
       <Billboard ref={labelRef} position={[0, LABEL_Y, 0]}>
         <WRBoard name={name} nameMr={nameMr} night={night} />
       </Billboard>

@@ -7,10 +7,12 @@ const BOARD_W = 210
 const BOARD_H = 56
 
 /**
- * The board's own width in scene metres, for callers that need to lay one out
- * against real geometry (a platform, say) rather than float it.
+ * The board's own size in scene metres, for callers that need to lay one out
+ * against real geometry (a platform, say) rather than float it, or to work out
+ * how much of the screen it covers (see station-labels.ts).
  */
 export const BOARD_WIDTH = BOARD_W
+export const BOARD_HEIGHT = BOARD_H
 
 /**
  * The board face is unlit (meshBasicMaterial), so it ignores the scene's
