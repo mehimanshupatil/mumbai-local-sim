@@ -96,6 +96,17 @@ _Avoid_: train, trip, run
 The physical train set that works a Service — the thing rendered on the Track.
 _Avoid_: train, consist, formation
 
+**Stock**:
+The class of Rake — which generation of EMU it is. Distinct from Service Type:
+two Slow Services are the same Service Type and may still be worked by
+different Stock, and it shows.
+_Avoid_: rolling stock (right in prose, too broad here), class, model, unit
+
+**Livery**:
+The painted scheme a Rake wears — body colour and bands. Decided by Service
+Type and Stock together, never by the Line a Service runs on.
+_Avoid_: paint, colours, skin, texture
+
 **Service Type**:
 What kind of Service it is — Slow, Fast, AC, or Express — which decides the
 Line it runs on and which Stations it Halts at.

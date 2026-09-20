@@ -12,6 +12,7 @@
     "bake": "tsx scripts/bake-network.ts",
     "bake:terrain": "tsx scripts/fetch-terrain.ts",
     "bake:realtimetable": "tsx scripts/bake-real-timetable.ts",
+    "bake:livery": "tsx scripts/bake-livery-atlas.ts",
     "bake:announcements": "python3 scripts/bake-announcements.py"
   },
   "dependencies": {
