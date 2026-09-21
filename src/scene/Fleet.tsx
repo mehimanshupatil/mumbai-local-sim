@@ -361,6 +361,19 @@ export function Fleet({
       mesh.instanceMatrix.needsUpdate = true
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
     }
+    // Clicking a rake goes through InstancedMesh.raycast, which tests the ray
+    // against a bounding sphere it computes once and then caches for the life
+    // of the mesh — moving the instances never invalidates it. Every instance
+    // here moves every frame, and the near mesh holds only the handful of
+    // rakes within DETAIL_DISTANCE_M, so its sphere is a small one frozen
+    // wherever those rakes stood the first time anything raycast it: a moment
+    // later the ray misses the sphere and picking silently stops. (The old
+    // single mesh got away with it because one sphere around every rake on a
+    // 124 km corridor intersects more or less anything.) Dropping it each
+    // frame costs a recompute on the next pointer event and nothing when the
+    // pointer is still.
+    near.boundingSphere = null
+    far.boundingSphere = null
     for (const mesh of [near, cabs]) {
       stripeOf(mesh).needsUpdate = true
       seedOf(mesh).needsUpdate = true
