@@ -4,6 +4,7 @@ import { SERVICE_TYPE_LABEL } from './service-labels'
 import { etaMinutes } from './sim/clock'
 import type { ServiceType } from './sim/types'
 import { simClock } from './scene/sim-clock'
+import { IS_COARSE_POINTER } from './scene/config'
 
 const stationName = (id: string) => network.stations.find((s) => s.id === id)?.name ?? id
 
@@ -80,7 +81,11 @@ export function FollowHint({
           {' · '}
         </>
       )}
-      C to cycle view · Esc to release
+      {/* Name the gesture this device actually has: a phone has no C key and
+          no Esc, but tapping the scene off the train releases the follow
+          (Scene's onPointerMissed), and the view buttons above are the
+          cycle. */}
+      {IS_COARSE_POINTER ? 'tap the scene to release' : 'C to cycle view · Esc to release'}
     </div>
   )
 }

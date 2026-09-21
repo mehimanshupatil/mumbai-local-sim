@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { network, timetables, type Focus } from './app-data'
+import { isNarrowViewport, useIsNarrow } from './viewport'
 import { simClock } from './scene/sim-clock'
 import { trainStates } from './sim/simulate'
 import { SERVICE_TYPE_LABEL } from './service-labels'
@@ -59,7 +60,14 @@ function pctOf(chainageM: number): number {
 
 export function StripMap({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus) => void }) {
   const [dots, setDots] = useState<Dot[]>([])
-  const [open, setOpen] = useState(true)
+  /**
+   * Open by default on a desktop, closed on a phone. The diagram is a second
+   * view of what the scene already shows, and at 393px it covers most of the
+   * scene — landing on a train simulator whose trains are behind a panel is
+   * the wrong first impression, and the panel is one tap away.
+   */
+  const [open, setOpen] = useState(() => !isNarrowViewport())
+  const narrow = useIsNarrow()
   const openRef = useRef(open)
   openRef.current = open
   const focusedRef = useRef<HTMLButtonElement>(null)
@@ -103,6 +111,13 @@ export function StripMap({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus)
   const focusedTrain = focus.mode === 'follow' ? focus.trainId : null
   const running = dots.length
 
+  /** On a phone the diagram covers the scene, so choosing something closes it:
+   * the point of the choice is to look at what was chosen. */
+  const select = (f: Focus) => {
+    onFocus(f)
+    if (narrow) setOpen(false)
+  }
+
   return (
     <aside className="strip">
       <header className="strip-head">
@@ -131,7 +146,7 @@ export function StripMap({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus)
                 ref={focused ? focusedRef : undefined}
                 className={`strip-stn${s.fastHalt ? ' strip-stn-fast' : ''}${focused ? ' strip-stn-on' : ''}`}
                 style={{ top: `${top}%` }}
-                onClick={() => onFocus({ mode: 'station', stationId: s.id })}
+                onClick={() => select({ mode: 'station', stationId: s.id })}
                 title={s.name}
               >
                 <span className="strip-tick" />
@@ -152,7 +167,7 @@ export function StripMap({ focus, onFocus }: { focus: Focus; onFocus: (f: Focus)
                 .filter(Boolean)
                 .join(' ')}
               style={{ top: `${d.pct}%` }}
-              onClick={() => onFocus({ mode: 'follow', trainId: d.id })}
+              onClick={() => select({ mode: 'follow', trainId: d.id })}
               title={`${SERVICE_TYPE_LABEL[d.serviceType]} ${d.direction === 'up' ? '↑ Churchgate' : '↓ Dahanu'}`}
             />
           ))}

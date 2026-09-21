@@ -8,6 +8,10 @@ html,
 body,
 #root {
   height: 100%;
+  /* Mobile browser chrome (the URL bar) hides and returns as you scroll, and
+     100% of a viewport that keeps changing height makes the scene jump. dvh
+     is that changing height, stated once. */
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -539,4 +543,163 @@ body {
   background: #7b1fa2;
   border-color: #9c40c4;
   color: #fff;
+}
+
+
+/* --- phones and small tablets -----------------------------------------
+ * The breakpoint is NARROW_MAX_PX in src/viewport.ts, stated twice because
+ * CSS cannot read a TS constant — change one and change the other.
+ *
+ * The rule the whole section follows: the scene is the app. Everything here
+ * either fits beside it or gets out of its way.
+ */
+@media (max-width: 720px) {
+  .header {
+    padding: 8px 10px;
+    gap: 8px;
+    /* Wrap rather than clip. Unwrapped, the clock controls ran ~90px past the
+       right edge of a 393px screen and the sound and time-zone buttons could
+       not be tapped at all. */
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .header h1 {
+    font-size: 15px;
+  }
+
+  /* The corridor is named in the line diagram; the header does not need to. */
+  .line-badge {
+    display: none;
+  }
+
+  .clock-controls {
+    gap: 4px;
+  }
+
+  .clock-time {
+    font-size: 14px;
+    margin-right: 2px;
+  }
+
+  /* A drawer over the scene rather than a column beside it: at this width
+     there is no beside. */
+  /* Below the header, which wraps to two rows at this width — at the desktop
+     offset the drawer and the collapsed chip both sat across the clock. */
+  .strip {
+    top: 84px;
+    bottom: 10px;
+    left: 10px;
+    width: min(72vw, 280px);
+  }
+
+  /* Room for a finger between station rows, and a name to match. */
+  .strip-scale {
+    height: calc(var(--rows) * 22px);
+  }
+
+  .strip-name {
+    font-size: 12px;
+    left: 34px;
+  }
+
+  /* A row's hit area is its padding: the tick itself is 2px tall, so without
+     this a station is a 2px target. Matched to the 22px pitch above so
+     neighbouring rows abut rather than overlap. */
+  .strip-stn {
+    padding: 10px 0;
+  }
+
+  .strip-toggle-closed {
+    top: 84px;
+    left: 10px;
+    font-size: 13px;
+    padding: 10px 14px;
+  }
+
+  /* Where a phone expects a detail panel: across the bottom, over the scene,
+     and scrollable rather than tall enough to cover it. */
+  .station-card {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    max-height: 46dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .follow-hint {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    transform: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px 8px;
+    text-align: center;
+  }
+
+  .follow-views {
+    margin-right: 0;
+  }
+}
+
+/* --- touch ------------------------------------------------------------
+ * Sized for a fingertip rather than a cursor, and keyed on the pointer
+ * rather than the width: a touchscreen laptop is wide and still has no
+ * mouse, while a narrow desktop window has one.
+ */
+@media (pointer: coarse) {
+  .speed-btn,
+  .follow-view,
+  .strip-toggle,
+  .card-close {
+    padding: 8px 12px;
+    /* A fingertip, not a cursor: the buttons were 31px tall with padding
+       alone. */
+    min-height: 40px;
+  }
+
+  .strip-toggle,
+  .card-close {
+    min-width: 40px;
+  }
+
+  /* The collapsed chip is the only way back to the line diagram, so it gets a
+     full finger rather than the toggle's default. */
+  .strip-toggle-closed {
+    padding: 12px 16px;
+  }
+
+  .strip-train {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+/* Short viewports — a phone held in landscape is 393px tall, and the desktop
+ * card is laid out top-down from a fixed offset. Cap it against the viewport
+ * and let it scroll rather than run off the bottom as arrivals fill it. */
+@media (max-height: 520px) {
+  .station-card {
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* A touchscreen on a wide screen: the station rows keep the desktop's 14px
+ * pitch there, so their hit area has to stay inside it. The narrow layout
+ * above opens the pitch to 22px and pads to match, and states it after this
+ * rule would override it. */
+@media (pointer: coarse) and (min-width: 721px) {
+  /* Vertical only: the row is centred on its tick by a -50% translate, so
+     horizontal padding would drag the tick off the rail. */
+  .strip-stn {
+    padding: 6px 0;
+  }
 }

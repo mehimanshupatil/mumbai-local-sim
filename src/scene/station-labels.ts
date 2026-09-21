@@ -89,6 +89,15 @@ const MINOR_MIN_SIZE = 0.42
 const FLOAT_SCREEN_WIDTH = 0.11
 
 /**
+ * ...but never narrower than this many CSS pixels. A share of the screen is
+ * the right rule for a big screen and the wrong one for a phone: 11% of 393px
+ * is a 43px board carrying a station name in two scripts, which is a yellow
+ * smudge. Below about a 900px-wide window the floor takes over and the labels
+ * stay the size a name needs, with the arbiter showing correspondingly fewer.
+ */
+const FLOAT_MIN_PX = 96
+
+/**
  * How close two boards may come, as a fraction of their combined half-sizes,
  * before the farther one yields. Anything below 1 permits real overlap — at
  * 0.9 the horizon stations still clipped each other by a tenth of a board,
@@ -114,7 +123,7 @@ const ndc = new Vector3()
  * Size and hide every Station name board for this frame. Called once, from
  * StationLabels, with nothing else touching these scales.
  */
-export function arbitrateLabels(camera: Camera, aspect: number): void {
+export function arbitrateLabels(camera: Camera, aspect: number, widthPx: number): void {
   const fov = ((camera as PerspectiveCamera).fov ?? 45) * (Math.PI / 180)
   const tanHalfFov = Math.tan(fov / 2)
   const candidates: Candidate[] = []
@@ -139,10 +148,11 @@ export function arbitrateLabels(camera: Camera, aspect: number): void {
       // than a thing in the world, so it is sized in screen width and holds it
       // at any distance — the same rule the marker's own scaling used to
       // approximate, now stated once, here.
+      const floatWidth = Math.max(FLOAT_SCREEN_WIDTH, (FLOAT_MIN_PX * 2) / widthPx)
       let scale =
         kind === 'board'
           ? entry.scale
-          : (FLOAT_SCREEN_WIDTH * dist * tanHalfFov * aspect) / BOARD_WIDTH
+          : (floatWidth * dist * tanHalfFov * aspect) / BOARD_WIDTH
       if (kind === 'board') {
         // Fade out as the platform's own boards become readable.
         scale *= clamp01((dist - CLOSE_DROP_M) / (CLOSE_FADE_M - CLOSE_DROP_M))
@@ -250,7 +260,7 @@ export function StationLabels() {
   const size = useThree((state) => state.size)
   const camera = useThree((state) => state.camera)
   useFrame(() => {
-    arbitrateLabels(camera, size.width / Math.max(1, size.height))
+    arbitrateLabels(camera, size.width / Math.max(1, size.height), size.width)
   })
   useEffect(() => {
     if (!import.meta.env.DEV) return
