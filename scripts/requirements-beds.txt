@@ -1,0 +1,5 @@
+# Bed de-honking (scripts/dehonk-beds.py), called by scripts/fetch-beds.sh.
+# curl and ffmpeg are also needed and are not Python packages — install them
+# with your package manager. The Beds themselves are committed, so a clone
+# needs none of this.
+numpy>=1.24

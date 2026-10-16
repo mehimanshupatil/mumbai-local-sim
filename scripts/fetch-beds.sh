@@ -7,31 +7,46 @@
 # authors and licences are listed in docs/attribution.md; that file is the
 # obligation, this script is only how the bytes got here.
 #
-# Outputs are committed, so a clone needs neither curl nor ffmpeg. Re-run only
-# to change the set:  ./scripts/fetch-beds.sh
+# Outputs are committed, so a clone needs neither curl nor ffmpeg — nor the
+# numpy in scripts/requirements-beds.txt, which only the de-honk step wants.
+# Re-run only to change the set:  ./scripts/fetch-beds.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CACHE=scripts/.cache/beds
 OUT=public/audio/beds
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$CACHE" "$OUT"
 
-# slug|freesound id|uploader|start offset (s)
+# The de-honk step is the only thing here that needs Python. Any interpreter
+# with numpy will do; PY overrides it for a venv.
+PY=${PY:-python3}
+"$PY" -c 'import numpy' 2>/dev/null || {
+  echo "need numpy: pip install -r scripts/requirements-beds.txt" >&2; exit 1; }
+
+# slug|freesound id|uploader|start offset (s)|de-honk
+#
+# De-honk is opt-in, for the clips that measurably honk. The detector cannot
+# tell a horn from a voice pitched below its search band (it reads the voice's
+# second harmonic as a horn's fundamental), so on `dusk-garden` it notched
+# every other harmonic of the chanting and removed no horn at all. Clips
+# without horns stay exactly as recorded.
 #
 # Two variants per palette so a Bed that plays for an hour never repeats the
 # same minute twice running; the crowd and traffic layers ride on top, driven
 # by live Service density rather than by the clock.
 BEDS=(
-  "dawn-birds|770080|tanweraman|20"
-  "dawn-suburb|430998|Bheemasena|30"
-  "day-street|578755|kevp888|10"
-  "day-traffic|465712|Nielsvdb|20"
-  "dusk-garden|466262|kevp888|30"
-  "dusk-turning|568216|deadmanswill|30"
-  "night-crickets|803557|Rico_Casazza|5"
-  "night-alley|803556|Rico_Casazza|60"
-  "crowd-kharghar|181118|sankalp|10"
-  "crowd-kanpur|180428|sankalp|15"
-  "traffic-jam|578743|kevp888|5"
+  "dawn-birds|770080|tanweraman|20|-"
+  "dawn-suburb|430998|Bheemasena|30|dehonk"
+  "day-street|578755|kevp888|10|dehonk"
+  "day-traffic|465712|Nielsvdb|20|dehonk"
+  "dusk-garden|466262|kevp888|30|-"
+  "dusk-turning|568216|deadmanswill|30|-"
+  "night-crickets|803557|Rico_Casazza|5|-"
+  "night-alley|803556|Rico_Casazza|60|-"
+  "crowd-kharghar|181118|sankalp|10|dehonk"
+  "crowd-kanpur|180428|sankalp|15|-"
+  "traffic-jam|578743|kevp888|5|dehonk"
 )
 
 # A minute is long enough that the ear never hears the whole thing before the
@@ -39,7 +54,7 @@ BEDS=(
 LEN=60
 
 for row in "${BEDS[@]}"; do
-  IFS='|' read -r slug id user start <<< "$row"
+  IFS='|' read -r slug id user start dehonk <<< "$row"
   src="$CACHE/$id.mp3"
   if [ ! -f "$src" ]; then
     echo "fetching $slug ($id by $user)"
@@ -58,7 +73,22 @@ for row in "${BEDS[@]}"; do
   start=$(awk -v s="$start" -v d="$dur" -v l="$LEN" 'BEGIN{m=d-l; if(m<0)m=0; print (s<m)?s:m}')
   len=$(awk -v s="$start" -v d="$dur" -v l="$LEN" 'BEGIN{r=d-s; print (r<l)?r:l}')
   out=$(awk -v l="$len" 'BEGIN{v=l-2; print (v>0)?v:0}')
+
+  # Cut first, to PCM, and encode from that. Seeking the MP3 inside the
+  # encode pass does not give the same bytes twice; this does. The cut is at
+  # full scale and before any loudness match, so the de-honker sees the same
+  # numbers whatever the clip's level. It notches the horns' own partials and
+  # leaves everything between them, which is why the loudness match after it
+  # still lands where it used to.
   ffmpeg -nostdin -loglevel error -y -ss "$start" -t "$len" -i "$src" \
+    -c:a pcm_s16le -ar 44100 -ac 2 "$TMP/raw.wav"
+  if [ "$dehonk" = dehonk ]; then
+    "$PY" scripts/dehonk-beds.py "$TMP/raw.wav" "$TMP/clean.wav"
+  else
+    mv "$TMP/raw.wav" "$TMP/clean.wav"
+  fi
+
+  ffmpeg -nostdin -loglevel error -y -i "$TMP/clean.wav" \
     -af "loudnorm=I=-23:TP=-2:LRA=11,afade=t=in:d=2,afade=t=out:st=$out:d=2" \
     -c:a aac -b:a 128k -ar 44100 -ac 2 -movflags +faststart "$OUT/$slug.m4a"
   echo "  -> $OUT/$slug.m4a  $(du -h "$OUT/$slug.m4a" | cut -f1)"

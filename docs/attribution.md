@@ -21,9 +21,10 @@ Every clip is a **CC-BY 4.0** field recording from [Freesound](https://freesound
 and most were recorded in India — the Bed is the one place where a real
 recording of the actual country beats anything synthetic.
 
-Each is used as a one-minute excerpt, loudness-matched and re-encoded to AAC
-(`scripts/fetch-beds.sh`). CC-BY 4.0 permits that, and asks for credit and an
-indication of changes in return; this table is both.
+Each is used as a one-minute excerpt, loudness-matched and re-encoded to AAC,
+and five of them are de-honked (`scripts/fetch-beds.sh`). CC-BY 4.0 permits
+that, and asks for credit and an indication of changes in return; this table
+is both.
 
 | File | Recording | Author | Source |
 | --- | --- | --- | --- |
@@ -40,8 +41,18 @@ indication of changes in return; this table is both.
 | `traffic-jam.m4a` | BR_002_India_TrafficJam | kevp888 | [578743](https://freesound.org/people/kevp888/sounds/578743/) |
 
 All eleven: **CC BY 4.0**, <https://creativecommons.org/licenses/by/4.0/>.
-Changes made: trimmed to a one-minute excerpt, loudness-normalised to −23 LUFS,
-two-second fades added at both ends, re-encoded to 128 kbps AAC.
+Changes made: trimmed to a one-minute excerpt; in `day-street`,
+`dawn-suburb`, `traffic-jam`, `crowd-kharghar` and `day-traffic` only, car and
+motorcycle horns attenuated by notching their own harmonic partials
+(`scripts/dehonk-beds.py`, −20 dB on up to six partials, nothing between them
+touched); loudness-normalised to −23 LUFS; two-second fades added at both
+ends; re-encoded to 128 kbps AAC.
+
+The de-honk is the one change that alters what the recording says rather than
+how loud or long it is, so it is worth being plain about: these are real
+Indian streets with the horns turned down, not quiet streets. A horn sounded
+in `day-street` sixty times a minute, which is faithful to the pavement and
+unbearable under a sim that runs for an hour.
 
 ## Speech
 
