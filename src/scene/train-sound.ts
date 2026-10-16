@@ -12,7 +12,8 @@
  *   horn      337 Hz and ~364 Hz sounded together — the beat between them is
  *             the growl — with the 2nd harmonic louder than the fundamental,
  *             partials out to 8x, and a 0.32 s blast
- *   traction  strongest partial sweeping 118-315 Hz across the ride
+ *   traction  strongest partial sweeping 118-315 Hz across the ride, sitting
+ *             well under the wheels' rolling roar rather than over it
  *   joints    envelope rhythm 1.7 Hz at speed, which is 22 m/s over 13 m rail
  *             panels: the standard Indian jointed-track length, confirmed
  *   squeal    a resonance at 3.71-3.72 kHz recurring at seven separate points,
@@ -134,8 +135,32 @@ export function clackBuffer(ctx: AudioContext): AudioBuffer {
 }
 
 /**
+ * Rolling noise, looped: wheels on rail, the bulk of what a moving train
+ * actually sounds like. Deterministic for the same reason the clack is.
+ */
+export function rollBuffer(ctx: AudioContext): AudioBuffer {
+  return cached('roll', () => {
+    const rate = ctx.sampleRate
+    const length = Math.ceil(2 * rate)
+    const buffer = ctx.createBuffer(1, length, rate)
+    const out = buffer.getChannelData(0)
+    let seed = 0x5bd1e995
+    for (let i = 0; i < length; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      out[i] = (seed / 0xffffffff) * 2 - 1
+    }
+    return buffer
+  })
+}
+
+/**
  * Brakes biting: the measured resonance and its partner, swelling as the shoes
  * load up and stopping when the train does.
+ *
+ * The resonances are rung by noise, not drawn as sine waves. Two pure tones at
+ * these pitches, with a warble on them, are what a bicycle bell is — that is
+ * how this first sounded. Noise through a narrow resonance keeps the pitch the
+ * cab recording measured and gives it the grind of metal on metal.
  */
 export function brakeBuffer(ctx: AudioContext): AudioBuffer {
   return cached('brake', () => {
@@ -144,26 +169,49 @@ export function brakeBuffer(ctx: AudioContext): AudioBuffer {
     const length = Math.ceil(seconds * rate)
     const buffer = ctx.createBuffer(1, length, rate)
     const out = buffer.getChannelData(0)
-    // Phase is integrated rather than computed as f*t, because the wobble makes
-    // the frequency time-varying: multiplying a moving frequency by t deepens
-    // the modulation the longer it runs, and a 0.8% waver turns into a siren.
-    let phase = 0
-    let phase2 = 0
+    let seed = 0x1b873593
+    const noise = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      return (seed / 0xffffffff) * 2 - 1
+    }
+    const main = resonator(SQUEAL_HZ, 40, rate)
+    const second = resonator(SQUEAL_SECOND_HZ, 30, rate)
+    let grind = 0
     for (let i = 0; i < length; i++) {
-      const t = i / rate
-      const p = t / seconds
-      // Squeal wanders slightly — a dead-steady tone reads as electronic.
-      const wobble = 1 + 0.008 * Math.sin(2 * Math.PI * 6.5 * t)
-      phase += (2 * Math.PI * SQUEAL_HZ * wobble) / rate
-      phase2 += (2 * Math.PI * SQUEAL_SECOND_HZ * wobble) / rate
-      const main = Math.sin(phase)
-      const second = 0.35 * Math.sin(phase2)
+      const p = i / length
+      const n = noise()
+      // The shoes themselves: a darker rasp under the squeal.
+      grind += (n - grind) * 0.2
       // In over half a second, out over the last third.
       const env = Math.min(1, p / 0.35) * Math.min(1, (1 - p) / 0.3)
-      out[i] = 0.13 * (main + second) * env
+      // Weighted to the old tones' loudness: a narrow band of noise carries
+      // far less energy than a sine, so these are not the 0.13 they replace.
+      out[i] = (1.8 * main(n) + 0.4 * second(n) + 0.1 * grind) * env
     }
     return buffer
   })
+}
+
+/** A two-pole band-pass at `hz`, normalised to unity gain at its peak. */
+function resonator(hz: number, q: number, rate: number): (x: number) => number {
+  const w = (2 * Math.PI * hz) / rate
+  const alpha = Math.sin(w) / (2 * q)
+  const a0 = 1 + alpha
+  const b0 = alpha / a0
+  const a1 = (-2 * Math.cos(w)) / a0
+  const a2 = (1 - alpha) / a0
+  let x1 = 0
+  let x2 = 0
+  let y1 = 0
+  let y2 = 0
+  return (x) => {
+    const y = b0 * x - b0 * x2 - a1 * y1 - a2 * y2
+    x2 = x1
+    x1 = x
+    y2 = y1
+    y1 = y
+    return y
+  }
 }
 
 /**
@@ -175,11 +223,12 @@ export function brakeBuffer(ctx: AudioContext): AudioBuffer {
  * together, and that coupling is most of what makes it read as a train.
  */
 export class RunningSound {
+  private roll: AudioBufferSourceNode
+  private rollFilter: BiquadFilterNode
+  private rollGain: GainNode
   private traction: OscillatorNode
-  private harmonic: OscillatorNode
-  private tractionGain: GainNode
-  private harmonicGain: GainNode
-  private flange: OscillatorNode
+  private flange: AudioBufferSourceNode
+  private flangeFilter: BiquadFilterNode
   private flangeGain: GainNode
   private panner: PannerNode
   private master: GainNode
@@ -202,29 +251,42 @@ export class RunningSound {
     this.master.gain.value = 0
     this.master.connect(this.panner).connect(destination)
 
+    // The roar of the wheels: noise, darkened, opening up as speed builds.
+    // This used to be a bare sawtooth at the traction pitch, which carried
+    // the speed well and sounded like a synth held down — a hum, not a train.
+    this.roll = ctx.createBufferSource()
+    this.roll.buffer = rollBuffer(ctx)
+    this.roll.loop = true
+    this.rollFilter = ctx.createBiquadFilter()
+    this.rollFilter.type = 'lowpass'
+    this.rollFilter.Q.value = 0.7
+    this.rollGain = ctx.createGain()
+    this.rollGain.gain.value = 0
+    this.roll.connect(this.rollFilter).connect(this.rollGain).connect(this.master)
+
+    // The motor, kept as one quiet sine under the roar: it is the measured
+    // sweep, and the sweep is what tells a rake pulling away from one coasting.
     this.traction = ctx.createOscillator()
-    this.traction.type = 'sawtooth'
-    this.tractionGain = ctx.createGain()
-    this.tractionGain.gain.value = 0.18
-    this.traction.connect(this.tractionGain).connect(this.master)
+    this.traction.type = 'sine'
+    const tractionGain = ctx.createGain()
+    tractionGain.gain.value = 0.018
+    this.traction.connect(tractionGain).connect(this.master)
 
-    // A second partial an octave up, which is where the measured traction
-    // energy actually sits at speed.
-    this.harmonic = ctx.createOscillator()
-    this.harmonic.type = 'triangle'
-    this.harmonicGain = ctx.createGain()
-    this.harmonicGain.gain.value = 0.08
-    this.harmonic.connect(this.harmonicGain).connect(this.master)
-
-    this.flange = ctx.createOscillator()
-    this.flange.type = 'sine'
-    this.flange.frequency.value = SQUEAL_HZ
+    // Flange squeal is the same resonance as the brakes, rung by the same
+    // rolling noise — a pure sine here read as a bell, like the brakes did.
+    this.flange = ctx.createBufferSource()
+    this.flange.buffer = rollBuffer(ctx)
+    this.flange.loop = true
+    this.flangeFilter = ctx.createBiquadFilter()
+    this.flangeFilter.type = 'bandpass'
+    this.flangeFilter.frequency.value = SQUEAL_HZ
+    this.flangeFilter.Q.value = 40
     this.flangeGain = ctx.createGain()
     this.flangeGain.gain.value = 0
-    this.flange.connect(this.flangeGain).connect(this.master)
+    this.flange.connect(this.flangeFilter).connect(this.flangeGain).connect(this.master)
 
+    this.roll.start()
     this.traction.start()
-    this.harmonic.start()
     this.flange.start()
     this.nextClackAt = ctx.currentTime
   }
@@ -253,7 +315,9 @@ export class RunningSound {
     const fraction = Math.min(1, Math.max(0, speedMps / TOP_SPEED_MPS))
     const hz = tractionHzFor(speedMps)
     this.traction.frequency.setTargetAtTime(hz, now, 0.12)
-    this.harmonic.frequency.setTargetAtTime(hz * 2, now, 0.12)
+    this.rollFilter.frequency.setTargetAtTime(220 + 1300 * fraction, now, 0.2)
+    // A standing rake rolls not at all.
+    this.rollGain.gain.setTargetAtTime(0.32 * Math.min(1, fraction * 3), now, 0.2)
     // A standing rake is not silent, but it is close; everything grows with speed.
     this.master.gain.setTargetAtTime(volume * (0.25 + 0.75 * fraction), now, 0.15)
 
@@ -261,7 +325,8 @@ export class RunningSound {
     // list of stations with curves. Below walking-pace curvature does nothing,
     // and a stationary rake never squeals.
     const squeal = Math.min(1, Math.max(0, (curvature - 0.0018) / 0.004)) * fraction
-    this.flangeGain.gain.setTargetAtTime(0.05 * squeal, now, 0.25)
+    // 0.8 on a narrow band of noise is the loudness 0.05 was on a sine.
+    this.flangeGain.gain.setTargetAtTime(0.8 * squeal, now, 0.25)
 
     this.scheduleClacks(speedMps, now)
   }
@@ -302,7 +367,7 @@ export class RunningSound {
     this.master.gain.cancelScheduledValues(now)
     this.master.gain.setValueAtTime(this.master.gain.value, now)
     this.master.gain.linearRampToValueAtTime(0, now + 0.12)
-    for (const osc of [this.traction, this.harmonic, this.flange]) osc.stop(now + 0.15)
+    for (const source of [this.roll, this.traction, this.flange]) source.stop(now + 0.15)
     setTimeout(() => {
       this.master.disconnect()
       this.panner.disconnect()
