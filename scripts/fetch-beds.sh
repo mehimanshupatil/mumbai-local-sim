@@ -24,29 +24,30 @@ PY=${PY:-python3}
 "$PY" -c 'import numpy' 2>/dev/null || {
   echo "need numpy: pip install -r scripts/requirements-beds.txt" >&2; exit 1; }
 
-# slug|freesound id|uploader|start offset (s)|de-honk
+# slug|freesound id|uploader|start offset (s)|cleaning (horns, bells, or -)
 #
-# De-honk is opt-in, for the clips that measurably honk. The detector cannot
+# Cleaning is opt-in, for the clips that measurably honk or ring. The detector cannot
 # tell a horn from a voice pitched below its search band (it reads the voice's
 # second harmonic as a horn's fundamental), so on `dusk-garden` it notched
-# every other harmonic of the chanting and removed no horn at all. Clips
-# without horns stay exactly as recorded.
+# every other harmonic of the chanting and removed no horn at all. The bell
+# finder would take half of that clip too. Clips with neither stay exactly as
+# recorded.
 #
 # Two variants per palette so a Bed that plays for an hour never repeats the
 # same minute twice running; the crowd and traffic layers ride on top, driven
 # by live Service density rather than by the clock.
 BEDS=(
   "dawn-birds|770080|tanweraman|20|-"
-  "dawn-suburb|430998|Bheemasena|30|dehonk"
-  "day-street|578755|kevp888|10|dehonk"
-  "day-traffic|465712|Nielsvdb|20|dehonk"
+  "dawn-suburb|430998|Bheemasena|30|horns+bells"
+  "day-street|578755|kevp888|10|horns+bells"
+  "day-traffic|465712|Nielsvdb|20|horns+bells"
   "dusk-garden|466262|kevp888|30|-"
   "dusk-turning|568216|deadmanswill|30|-"
   "night-crickets|803557|Rico_Casazza|5|-"
   "night-alley|803556|Rico_Casazza|60|-"
-  "crowd-kharghar|181118|sankalp|10|dehonk"
+  "crowd-kharghar|181118|sankalp|10|horns"
   "crowd-kanpur|180428|sankalp|15|-"
-  "traffic-jam|578743|kevp888|5|dehonk"
+  "traffic-jam|578743|kevp888|5|horns+bells"
 )
 
 # A minute is long enough that the ear never hears the whole thing before the
@@ -54,7 +55,7 @@ BEDS=(
 LEN=60
 
 for row in "${BEDS[@]}"; do
-  IFS='|' read -r slug id user start dehonk <<< "$row"
+  IFS='|' read -r slug id user start clean <<< "$row"
   src="$CACHE/$id.mp3"
   if [ ! -f "$src" ]; then
     echo "fetching $slug ($id by $user)"
@@ -82,8 +83,11 @@ for row in "${BEDS[@]}"; do
   # still lands where it used to.
   ffmpeg -nostdin -loglevel error -y -ss "$start" -t "$len" -i "$src" \
     -c:a pcm_s16le -ar 44100 -ac 2 "$TMP/raw.wav"
-  if [ "$dehonk" = dehonk ]; then
-    "$PY" scripts/dehonk-beds.py "$TMP/raw.wav" "$TMP/clean.wav"
+  if [ "$clean" != - ]; then
+    flags=()
+    [[ $clean == *horns* ]] && flags+=(--horns)
+    [[ $clean == *bells* ]] && flags+=(--bells)
+    "$PY" scripts/dehonk-beds.py "${flags[@]}" "$TMP/raw.wav" "$TMP/clean.wav"
   else
     mv "$TMP/raw.wav" "$TMP/clean.wav"
   fi

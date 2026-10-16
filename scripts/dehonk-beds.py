@@ -23,11 +23,18 @@ A horn is separable from a bird, a cricket or a voice by three facts at once:
   * it is a harmonic stack, not one tone — 2f and 3f are both there;
   * it is held, 0.15 s or more, at a steady pitch, where a chirp slides.
 
+Bicycle bells are the other thing a street is full of, and under a sim they
+read as the train itself tinkling. `--bells` takes those out the same way: a
+bell strike is several narrow, inharmonic partials between 2.5 and 10 kHz,
+arriving all at once with a hard onset and then ringing at a fixed pitch.
+A bird chirp slides off its bin, and a cricket never stops, so neither is a
+strike.
+
 Deterministic: same input bytes, same output bytes. Called by fetch-beds.sh
 between the trim and the loudness match; the results are committed, so a clone
 needs neither this script nor numpy.
 
-    python3 scripts/dehonk-beds.py in.wav out.wav
+    python3 scripts/dehonk-beds.py [--horns] [--bells] in.wav out.wav
 """
 import sys
 import wave
@@ -153,7 +160,92 @@ def horn_gain(mono, sr, n, hop):
     return gain, keep
 
 
-def main(src, dst):
+BELL_LO, BELL_HI = 2500.0, 10000.0
+BELL_PROMINENCE_DB = 15   # over the spectrum either side of it
+BELL_ONSET_DB = 10        # rise at the strike, over two frames
+BELL_MIN_S, BELL_MAX_S = 0.08, 2.0   # rings, but stops — unlike a cricket
+BELL_MIN_PARTIALS = 3     # one partial alone is a bird; a bell has several
+NEIGHBOURHOOD = 12        # bins either side for the local spectral median
+
+
+def bell_gain(mono, sr, n, hop):
+    """A gain per frame and bin: 1 everywhere except on a bell's partials."""
+    win = np.hanning(n)
+    mag = np.abs(stft(mono, n, hop, win))
+    db = 20 * np.log10(mag + 1e-12)
+    freqs = np.fft.rfftfreq(n, 1 / sr)
+    n_frames, n_bins = db.shape
+    band = np.where((freqs >= BELL_LO) & (freqs <= BELL_HI))[0]
+    lo, hi = band[0], band[-1] + 1
+
+    padded = np.pad(db, ((0, 0), (NEIGHBOURHOOD, NEIGHBOURHOOD)), mode="edge")
+    window = np.lib.stride_tricks.sliding_window_view(
+        padded[:, lo:hi + 2 * NEIGHBOURHOOD], 2 * NEIGHBOURHOOD + 1, axis=1)
+    local = np.median(window, axis=2)
+    sub = db[:, lo:hi]
+    peak = ((sub - local > BELL_PROMINENCE_DB)
+            & (sub >= np.roll(sub, 1, axis=1)) & (sub >= np.roll(sub, -1, axis=1)))
+    # A ringing partial wavers by a bin; let it, so the run is not broken.
+    held = peak | np.roll(peak, 1, axis=1) | np.roll(peak, -1, axis=1)
+    # And a ringing partial flickers, its neighbours beating against it; a
+    # frame or two of dropout is still the same ring.
+    for gap in (1, 2):
+        bridged = np.zeros_like(held)
+        bridged[gap:-1] = held[:-gap - 1] & held[gap + 1:]
+        held |= bridged
+
+    need, cap = int(BELL_MIN_S * sr / hop), int(BELL_MAX_S * sr / hop)
+    ring = np.zeros_like(held)
+    for b in range(held.shape[1]):
+        col = held[:, b]
+        i = 0
+        while i < n_frames:
+            if not col[i]:
+                i += 1
+                continue
+            j = i
+            while j < n_frames and col[j]:
+                j += 1
+            # The strike can peak a frame or two into the ring.
+            struck = (sub[i:min(j, i + 3), b].max()
+                      - sub[max(0, i - 2), b]) > BELL_ONSET_DB
+            if struck and need <= j - i <= cap:
+                ring[i:j, b] = True
+            i = j
+
+    # Count partials, not bins: a partial that spans three bins is one.
+    starts = ring & ~np.roll(ring, 1, axis=1)
+    strike = starts.sum(axis=1) >= BELL_MIN_PARTIALS
+    # The whole ring of a struck partial goes, not only the frames where its
+    # siblings were still sounding alongside it.
+    keep_bins = np.zeros_like(ring)
+    for b in range(ring.shape[1]):
+        col = ring[:, b]
+        i = 0
+        while i < n_frames:
+            if not col[i]:
+                i += 1
+                continue
+            j = i
+            while j < n_frames and col[j]:
+                j += 1
+            if strike[i:j].any():
+                keep_bins[i:j, b] = True
+            i = j
+
+    gain = np.ones((n_frames, n_bins))
+    cut = 10 ** (CUT_DB / 20)
+    # A partial's skirt spreads a bin either side of its peak; take that too.
+    wide = keep_bins | np.roll(keep_bins, 1, axis=1) | np.roll(keep_bins, -1, axis=1)
+    gain[:, lo:hi][wide] = cut
+    if SMOOTH_FRAMES > 1:
+        kernel = np.ones(SMOOTH_FRAMES) / SMOOTH_FRAMES
+        gain = np.apply_along_axis(
+            lambda v: np.convolve(v, kernel, mode="same"), 0, gain)
+    return gain, keep_bins.any(axis=1)
+
+
+def main(src, dst, horns, bells):
     x, sr = read_wav(src)
     scale = max(1, int(round(sr / BASE_SR)))
     n, hop = BASE_N * scale, BASE_HOP * scale
@@ -161,21 +253,32 @@ def main(src, dst):
 
     # The mask comes from the mono sum, then applies to both channels, so the
     # stereo image of the street survives the surgery.
-    gain, keep = horn_gain(x.mean(axis=1), sr, n, hop)
+    mono = x.mean(axis=1)
+    gain = None
+    report = []
+    for wanted, find, what in ((horns, horn_gain, "de-honked"),
+                               (bells, bell_gain, "de-belled")):
+        if not wanted:
+            continue
+        g, keep = find(mono, sr, n, hop)
+        gain = g if gain is None else np.minimum(gain, g)
+        report.append(f"{what} {100 * keep.mean():.1f}%")
 
     out = np.zeros_like(x)
     for channel in range(x.shape[1]):
         spec = stft(x[:, channel], n, hop, win)
-        rows = min(spec.shape[0], gain.shape[0])
-        spec[:rows] *= gain[:rows]
+        if gain is not None:
+            rows = min(spec.shape[0], gain.shape[0])
+            spec[:rows] *= gain[:rows]
         out[:, channel] = istft(spec, n, hop, win, len(x))
 
     write_wav(dst, out, sr)
-    print(f"  de-honked {100 * keep.mean():.1f}% of frames "
-          f"({CUT_DB:.0f} dB on {HARMONICS} partials)", file=sys.stderr)
+    print(f"  {', '.join(report) or 'untouched'} of frames", file=sys.stderr)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    paths = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(paths) != 2 or not flags or flags - {"--horns", "--bells"}:
         sys.exit(__doc__)
-    main(sys.argv[1], sys.argv[2])
+    main(paths[0], paths[1], "--horns" in flags, "--bells" in flags)

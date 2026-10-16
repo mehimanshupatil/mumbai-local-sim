@@ -22,9 +22,9 @@ and most were recorded in India — the Bed is the one place where a real
 recording of the actual country beats anything synthetic.
 
 Each is used as a one-minute excerpt, loudness-matched and re-encoded to AAC,
-and five of them are de-honked (`scripts/fetch-beds.sh`). CC-BY 4.0 permits
-that, and asks for credit and an indication of changes in return; this table
-is both.
+and five of them have horns or bicycle bells turned down
+(`scripts/fetch-beds.sh`). CC-BY 4.0 permits that, and asks for credit and an
+indication of changes in return; this table is both.
 
 | File | Recording | Author | Source |
 | --- | --- | --- | --- |
@@ -45,12 +45,14 @@ Changes made: trimmed to a one-minute excerpt; in `day-street`,
 `dawn-suburb`, `traffic-jam`, `crowd-kharghar` and `day-traffic` only, car and
 motorcycle horns attenuated by notching their own harmonic partials
 (`scripts/dehonk-beds.py`, −20 dB on up to six partials, nothing between them
-touched); loudness-normalised to −23 LUFS; two-second fades added at both
+touched); in `day-street`, `dawn-suburb`, `traffic-jam` and `day-traffic`,
+bicycle bells attenuated the same way, −20 dB on each struck partial between
+2.5 and 10 kHz; loudness-normalised to −23 LUFS; two-second fades added at both
 ends; re-encoded to 128 kbps AAC.
 
 The de-honk is the one change that alters what the recording says rather than
 how loud or long it is, so it is worth being plain about: these are real
-Indian streets with the horns turned down, not quiet streets. A horn sounded
+Indian streets with the horns and bells turned down, not quiet streets. A horn sounded
 in `day-street` sixty times a minute, which is faithful to the pavement and
 unbearable under a sim that runs for an hour.
 
